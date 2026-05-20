@@ -159,6 +159,18 @@ async function readConfig(): Promise<AppConfig> {
   }
 }
 
+/**
+ * Mask the Indian Kanoon API token for display. The renderer only needs to
+ * know whether a token is set, never its value — get-config and save-config
+ * both return this masked form. save-config treats an incoming value equal
+ * to the mask of the stored token as "unchanged" and keeps the real token.
+ */
+function maskToken(token: string): string {
+  if (!token) return "";
+  if (token.length <= 8) return "********";
+  return `${token.slice(0, 4)}****${token.slice(-4)}`;
+}
+
 async function readPortOverride(): Promise<number | null> {
   try {
     const raw = await fs.readFile(APPDATA_PORT_FILE, "utf-8");
@@ -454,7 +466,11 @@ async function createWindow(showOnReady = true): Promise<void> {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      // webSecurity / allowRunningInsecureContent default to these values;
+      // pinned explicitly so a future edit cannot silently weaken them.
+      webSecurity: true,
+      allowRunningInsecureContent: false
     }
   });
 
@@ -495,6 +511,18 @@ async function createWindow(showOnReady = true): Promise<void> {
 // IPC channels — names and shapes are part of the public preload API.
 // DO NOT rename these; they are referenced by frontend React code.
 // ---------------------------------------------------------------------------
+
+/**
+ * A session id is interpolated into a `session_<id>.json` filename, so it
+ * must be a string of 1-64 chars from [A-Za-z0-9_-]. This rejects path
+ * traversal ("../"), absurdly long values, and non-string IPC payloads
+ * (null / undefined / objects / arrays). Mirrors the backend's
+ * session_store._SESSION_ID_RE.
+ */
+function isValidSessionId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+}
+
 ipcMain.handle("open-output-folder", async (_event, outputFile: string) => {
   if (!outputFile || typeof outputFile !== "string") {
     // Open the default output folder if nothing specific was requested.
@@ -546,8 +574,8 @@ ipcMain.handle("list-sessions", async () => {
   }
 });
 
-ipcMain.handle("read-session", async (_event, sessionId: string) => {
-  if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+ipcMain.handle("read-session", async (_event, sessionId: unknown) => {
+  if (!isValidSessionId(sessionId)) {
     throw new Error("Invalid session id.");
   }
   const filePath = path.join(dataDir(), `session_${sessionId}.json`);
@@ -555,9 +583,9 @@ ipcMain.handle("read-session", async (_event, sessionId: string) => {
   return JSON.parse(raw);
 });
 
-ipcMain.handle("delete-session", (_event, sessionId: string) => {
+ipcMain.handle("delete-session", (_event, sessionId: unknown) => {
   try {
-    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+    if (!isValidSessionId(sessionId)) {
       return { success: false, error: "Invalid session id." };
     }
     const filePath = path.join(dataDir(), `session_${sessionId}.json`);
@@ -576,13 +604,25 @@ ipcMain.handle("delete-session", (_event, sessionId: string) => {
 // (additive); the four originals above are unchanged.
 // ---------------------------------------------------------------------------
 ipcMain.handle("get-config", async () => {
-  return await readConfig();
+  const cfg = await readConfig();
+  // Never hand the real IK token to the renderer — return a masked form.
+  return { ...cfg, indiankanoon_token: maskToken(cfg.indiankanoon_token) };
 });
 
 ipcMain.handle("save-config", async (_event, next: Partial<AppConfig>) => {
   try {
     const current = await readConfig();
     const merged: AppConfig = { ...current, ...next };
+    // The renderer only ever sees the masked token (see get-config). If the
+    // incoming value is that exact mask, the user did not change the field —
+    // restore the real stored token so a save or desktop-toggle can never
+    // overwrite it with the mask.
+    if (
+      typeof next.indiankanoon_token === "string" &&
+      next.indiankanoon_token === maskToken(current.indiankanoon_token)
+    ) {
+      merged.indiankanoon_token = current.indiankanoon_token;
+    }
     if (
       !Number.isInteger(merged.backend_port) ||
       merged.backend_port < 1024 ||
@@ -601,7 +641,12 @@ ipcMain.handle("save-config", async (_event, next: Partial<AppConfig>) => {
     // Restart the backend so it picks up the new port / config.
     await killBackend();
     await ensureBackendRunning(merged);
-    return { success: true, config: merged, backend_port: resolvedBackendPort };
+    return {
+      success: true,
+      // Echo the config back masked — never return the real token.
+      config: { ...merged, indiankanoon_token: maskToken(merged.indiankanoon_token) },
+      backend_port: resolvedBackendPort
+    };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }

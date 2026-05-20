@@ -21,6 +21,7 @@ import socket
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 
 from paths import (
     PORT_FALLBACK_CHAIN,
@@ -76,6 +77,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request-body cap for POST /generate. An OCR'd legal notice can be sizeable,
+# but 10 MiB is a generous ceiling; anything past it is rejected before the
+# JSON body is parsed. Content-Length is the gate — Electron and httpx both
+# send it for a JSON POST. A chunked request with no Content-Length is not
+# capped here (acceptable: the backend binds to 127.0.0.1 only).
+MAX_GENERATE_BODY_BYTES = 10 * 1024 * 1024  # 10 MiB
+
+
+@app.middleware("http")
+async def limit_generate_body(request, call_next):
+    """Reject an oversized POST /generate body with HTTP 413."""
+    if request.method == "POST" and request.url.path == "/generate":
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared = int(content_length)
+            except ValueError:
+                declared = -1
+            if declared > MAX_GENERATE_BODY_BYTES:
+                limit_mib = MAX_GENERATE_BODY_BYTES // (1024 * 1024)
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"Request body exceeds the {limit_mib} MiB limit."},
+                )
+    return await call_next(request)
+
 
 app.include_router(health.router)
 app.include_router(models.router)

@@ -24,6 +24,7 @@ before calling :func:`parse_file`.
 from __future__ import annotations
 
 import io
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -52,6 +53,41 @@ class UnsupportedFileType(Exception):
     """Raised when :func:`parse_file` is asked to handle an unknown extension."""
 
 
+def _assert_no_xxe(data: bytes) -> None:
+    """Reject an OOXML file (.docx/.xlsx) that embeds a DTD or entity.
+
+    .docx and .xlsx are ZIP containers of XML parts. An XXE attack smuggles
+    a ``<!DOCTYPE>`` / ``<!ENTITY>`` declaration into one of those parts to
+    pull in local files or make the parser hit the network.
+
+    Legitimate Word/Excel files never declare a DOCTYPE or ``<!ENTITY>`` in
+    their XML parts, so their presence is treated as hostile and the file
+    is rejected outright. This is a parser-independent guard: it holds no
+    matter how python-docx / openpyxl / lxml are configured or versioned,
+    and it never lets a crafted entity reach an XML parser at all.
+
+    A ``<!DOCTYPE>`` must appear in the XML prolog, so scanning the first
+    64 KiB of each XML part is sufficient.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for name in zf.namelist():
+                lname = name.lower()
+                if not (lname.endswith(".xml") or lname.endswith(".rels")):
+                    continue
+                with zf.open(name) as member:
+                    head = member.read(64 * 1024).lower()
+                if b"<!doctype" in head or b"<!entity" in head:
+                    raise UnsupportedFileType(
+                        "File contains an XML DOCTYPE/entity declaration "
+                        "(possible XXE attack) and was rejected."
+                    )
+    except zipfile.BadZipFile:
+        # Not a valid ZIP — the format-specific parser will raise a clear
+        # error of its own; nothing to pre-screen here.
+        return
+
+
 def parse_file(filename: str, data: bytes) -> str:
     """Extract plain text from a notice file.
 
@@ -59,14 +95,17 @@ def parse_file(filename: str, data: bytes) -> str:
     :param data: raw bytes of the file
     :returns: extracted text, with sheets/tables flattened to one
         ``" | "``-separated line per row
-    :raises UnsupportedFileType: if the extension isn't in :data:`SUPPORTED_EXTS`
+    :raises UnsupportedFileType: if the extension isn't in :data:`SUPPORTED_EXTS`,
+        or if a .docx/.xlsx embeds a DTD/entity (possible XXE)
     """
     ext = Path(filename).suffix.lower()
     if ext == ".pdf":
         return _parse_pdf(data)
     if ext == ".docx":
+        _assert_no_xxe(data)
         return _parse_docx(data)
     if ext == ".xlsx":
+        _assert_no_xxe(data)
         return _parse_xlsx(data)
     if ext == ".xls":
         return _parse_xls(data)

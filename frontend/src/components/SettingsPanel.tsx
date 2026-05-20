@@ -262,7 +262,7 @@ export function SettingsPanel() {
 
       <Field
         label="Indian Kanoon API Token"
-        hint="Required for automatic law updates. Get free token at api.indiankanoon.org (non-commercial use)"
+        hint="Required for automatic law updates. Get a free token at api.indiankanoon.org (non-commercial use). A saved token is shown masked — leave it unchanged to keep it, or type a new token to replace it."
         style={{ marginTop: 12 }}
       >
         <Input

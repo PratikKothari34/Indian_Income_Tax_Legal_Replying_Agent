@@ -47,6 +47,9 @@ def rag_status() -> dict[str, Any]:
 @router.post("/sync")
 async def rag_sync_trigger() -> dict[str, str]:
     """Kick off a sync in the background. Returns immediately."""
+    # SECURITY: this endpoint is unauthenticated. It is safe only because
+    # the backend binds to 127.0.0.1 (see main.py — uvicorn host). If the
+    # bind address ever changes, add token auth here before shipping.
     # Fire-and-forget. The lock inside run_sync() guarantees we never
     # have two overlapping sync runs even if the user mashes the button.
     asyncio.create_task(rag_scheduler.run_sync())
@@ -69,6 +72,10 @@ async def rag_reindex() -> dict[str, str]:
     store corruption. Returns immediately; progress is visible via
     ``GET /rag/status`` (``chunks_total`` will rise as the work completes).
     """
+    # SECURITY: this endpoint is unauthenticated and destructive (it wipes
+    # the vector store). It is safe only because the backend binds to
+    # 127.0.0.1 (see main.py — uvicorn host). If the bind address ever
+    # changes, add token auth here before shipping.
     def _reindex_blocking() -> None:
         try:
             rag_embedder.clear_collection()

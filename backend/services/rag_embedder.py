@@ -291,6 +291,38 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# Metadata values are written into ChromaDB's SQLite store and later echoed
+# back into the LLM context block. Null bytes can corrupt SQLite TEXT
+# storage, and path separators do not belong in descriptive fields. These
+# two fields legitimately contain separators (a filesystem path and a URL),
+# so they are exempt from separator stripping — but still de-nulled.
+_PATH_SHAPED_META_FIELDS = frozenset({"local_path", "source_url"})
+_MAX_META_STR_LEN = 2000
+
+
+def _sanitize_meta_value(key: str, value: Any) -> Any:
+    """Sanitise one metadata value.
+
+    Strips NUL and C0 control characters (keeping tab / newline / CR) from
+    every string, additionally strips ``/`` and ``\\`` from descriptive
+    (non-path) fields, and caps length. Non-string values pass through.
+    """
+    if not isinstance(value, str):
+        return value
+    cleaned = "".join(
+        ch for ch in value if ch in ("\t", "\n", "\r") or ord(ch) >= 0x20
+    )
+    if key not in _PATH_SHAPED_META_FIELDS:
+        cleaned = cleaned.replace("/", " ").replace("\\", " ")
+    return cleaned[:_MAX_META_STR_LEN]
+
+
+def _sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``meta`` with every string value sanitised for
+    safe ChromaDB storage — see :func:`_sanitize_meta_value`."""
+    return {k: _sanitize_meta_value(k, v) for k, v in meta.items()}
+
+
 # ---------------------------------------------------------------------------
 # Ingest
 # ---------------------------------------------------------------------------
@@ -341,18 +373,20 @@ def ingest_pdf(pdf_meta: dict[str, Any]) -> int:
             ids.append(chunk_id)
             docs.append(chunk)
             metadatas.append(
-                {
-                    "source_url": source_url,
-                    "document_title": pdf_meta["document_title"],
-                    "document_type": pdf_meta["document_type"],
-                    "cbdt_ref": cbdt_ref,
-                    "effective_date": effective_date,
-                    "is_superseded": is_superseded,
-                    "superseded_by": superseded_by,
-                    "date_fetched": pdf_meta["fetched_at"],
-                    "page_number": page_num,
-                    "local_path": str(pdf_path),
-                }
+                _sanitize_metadata(
+                    {
+                        "source_url": source_url,
+                        "document_title": pdf_meta["document_title"],
+                        "document_type": pdf_meta["document_type"],
+                        "cbdt_ref": cbdt_ref,
+                        "effective_date": effective_date,
+                        "is_superseded": is_superseded,
+                        "superseded_by": superseded_by,
+                        "date_fetched": pdf_meta["fetched_at"],
+                        "page_number": page_num,
+                        "local_path": str(pdf_path),
+                    }
+                )
             )
 
     if not ids:

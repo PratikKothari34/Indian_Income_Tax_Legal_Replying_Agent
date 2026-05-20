@@ -88,8 +88,19 @@ MAX_GENERATE_BODY_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 @app.middleware("http")
 async def limit_generate_body(request, call_next):
-    """Reject an oversized POST /generate body with HTTP 413."""
+    """Reject an oversized POST /generate body with HTTP 413.
+
+    Two gates: the Content-Length header (cheap, the normal case) and —
+    for a chunked request that carries no Content-Length — a materialised
+    read of the body. Starlette caches the body it reads here, so the
+    downstream route still parses it normally.
+    """
     if request.method == "POST" and request.url.path == "/generate":
+        limit_mib = MAX_GENERATE_BODY_BYTES // (1024 * 1024)
+        too_large = JSONResponse(
+            status_code=413,
+            content={"detail": f"Request body exceeds the {limit_mib} MiB limit."},
+        )
         content_length = request.headers.get("content-length")
         if content_length is not None:
             try:
@@ -97,11 +108,14 @@ async def limit_generate_body(request, call_next):
             except ValueError:
                 declared = -1
             if declared > MAX_GENERATE_BODY_BYTES:
-                limit_mib = MAX_GENERATE_BODY_BYTES // (1024 * 1024)
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": f"Request body exceeds the {limit_mib} MiB limit."},
-                )
+                return too_large
+        elif request.headers.get("transfer-encoding", "").lower() == "chunked":
+            # No Content-Length to trust — a chunked request would slip the
+            # header check. Materialise the body and measure it; Starlette
+            # caches it so call_next() can still read it downstream.
+            body = await request.body()
+            if len(body) > MAX_GENERATE_BODY_BYTES:
+                return too_large
     return await call_next(request)
 
 

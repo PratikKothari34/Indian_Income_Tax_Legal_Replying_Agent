@@ -202,6 +202,18 @@ def _extract_pages(doc_path: Path) -> list[tuple[int, str]]:
         except ImportError:
             log.warning("python-docx not installed — cannot parse %s", doc_path.name)
             return []
+        # XXE pre-screen — the same guard /upload applies. A drop-folder
+        # .docx is untrusted; parser._assert_no_xxe rejects a file that
+        # embeds a DTD / external entity. It works on raw bytes, so the
+        # file is read first. Any failure (hostile payload or unreadable
+        # file) skips this document — it never crashes the sync.
+        try:
+            from services.parser import _assert_no_xxe
+
+            _assert_no_xxe(doc_path.read_bytes())
+        except Exception as e:
+            log.warning("[rag] skipped %s — XXE check failed: %s", doc_path.name, e)
+            return []
         try:
             doc = Document(str(doc_path))
             text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())

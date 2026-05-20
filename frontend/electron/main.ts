@@ -498,11 +498,19 @@ async function createWindow(showOnReady = true): Promise<void> {
 ipcMain.handle("open-output-folder", async (_event, outputFile: string) => {
   if (!outputFile || typeof outputFile !== "string") {
     // Open the default output folder if nothing specific was requested.
-    const folder = outputDir();
-    const result = await shell.openPath(folder);
+    const result = await shell.openPath(APPDATA_OUTPUT_DIR);
     return result ? { ok: false, error: result } : { ok: true };
   }
-  const folder = path.dirname(outputFile);
+  // Validate the resolved folder stays inside BASE_DIR before handing it
+  // to the OS shell — rejects path traversal (e.g. ..\..). The path.sep
+  // suffix stops a sibling-prefix bypass (e.g. ...\ITaxReplyAgent_evil).
+  const folder = path.resolve(path.dirname(outputFile));
+  const base = path.resolve(APPDATA_BASE_DIR);
+  if (folder !== base && !folder.startsWith(base + path.sep)) {
+    await frontendLog(`open-output-folder: rejected path outside BASE_DIR: ${folder}`);
+    const result = await shell.openPath(APPDATA_OUTPUT_DIR);
+    return result ? { ok: false, error: result } : { ok: true };
+  }
   const result = await shell.openPath(folder);
   return result ? { ok: false, error: result } : { ok: true };
 });

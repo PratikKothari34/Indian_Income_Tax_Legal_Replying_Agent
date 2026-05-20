@@ -41,6 +41,7 @@ desktop.ini
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # Debug dumps
 backend/rag/debug_*.html

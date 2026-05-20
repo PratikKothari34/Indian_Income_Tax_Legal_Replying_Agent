@@ -1,0 +1,43 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+*.pyc
+
+# Build outputs
+dist/
+dist-backend/
+build-backend/
+frontend/dist/
+
+# Node
+frontend/node_modules/
+frontend/.venv/
+
+# User data (never commit)
+backend/data/
+backend/output/
+backend/uploads/
+backend/logs/
+backend/rag/chromadb/
+backend/rag/docs/
+backend/rag/models/
+backend/rag/sync_status.json
+
+# Secrets
+backend/config.json
+
+# Electron build cache
+frontend/dist/
+frontend/build/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/

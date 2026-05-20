@@ -1,0 +1,29 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+pydantic==2.9.2
+ollama==0.3.3
+pdfplumber==0.11.4
+python-docx==1.1.2
+openpyxl==3.1.5
+xlrd==2.0.1
+pytesseract==0.3.13
+Pillow==10.4.0
+# Phase 2 — RAG (hybrid: manual drop-folder + Indian Kanoon REST API +
+# local vector store + scheduler).
+sentence-transformers>=2.7.0
+chromadb>=0.5.0
+APScheduler>=3.10.0
+httpx>=0.27.0
+# Indian Kanoon scrape replaced an earlier Playwright-driven attempt
+# against incometaxindia.gov.in (blocked by Akamai at the edge). All
+# auto-fetch traffic is now plain JSON over httpx against
+# https://api.indiankanoon.org/. beautifulsoup4 + lxml strip the HTML
+# embedded inside the IK /doc/<docid>/ JSON payload into plain text
+# before we save .txt files for the embedder.
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+# Resource probe used by services/ollama_client.py to pick between
+# qwen2.5:14b (default) and deepseek-r1:14b (better reasoning) at
+# chat-time based on available RAM/VRAM and task complexity.
+psutil>=5.9.0

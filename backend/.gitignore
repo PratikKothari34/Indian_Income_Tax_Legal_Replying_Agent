@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+config.json
+uploads/*
+output/*
+data/*
+!uploads/.gitkeep
+!output/.gitkeep
+!data/.gitkeep

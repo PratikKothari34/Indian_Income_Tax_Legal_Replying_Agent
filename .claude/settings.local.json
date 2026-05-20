@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(git check-ignore *)",
+      "Bash(cp config.json config.json.bak)",
+      "Bash(python -c \"import json,pathlib; p=pathlib.Path\\('config.json'\\); c=json.loads\\(p.read_text\\(\\)\\); c['indiankanoon_token']='ae51f91656f884190668cf6b649139ed33766013'; p.write_text\\(json.dumps\\(c,indent=2\\)\\)\")",
+      "Bash(mv config.json.bak config.json)",
+      "Bash(.venv/Scripts/python.exe -m pip install \"psutil>=5.9.0\" --quiet)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend.spec'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import json; cfg=json.load\\(open\\('frontend/package.json'\\)\\); print\\('appId:', cfg['build']['appId']\\); print\\('shortcutName:', cfg['build']['nsis']['shortcutName']\\); print\\('include:', cfg['build']['nsis']['include']\\); print\\('extraResources:', cfg['build']['extraResources']\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(npx --no-install tsc -p electron/tsconfig.json --noEmit)",
+      "Bash(npx --no-install tsc --noEmit)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

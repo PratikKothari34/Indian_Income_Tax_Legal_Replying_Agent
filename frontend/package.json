@@ -1,0 +1,88 @@
+{
+  "name": "income-tax-legal-reply-agent-frontend",
+  "version": "1.0.0",
+  "description": "Indian Income Tax Legal Reply Agent",
+  "author": "Pratik V Kothari",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"npm:dev:electron\"",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && tsc -p electron/tsconfig.json && set ELECTRON_RUN_AS_NODE=&& electron .",
+    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "build": "tsc --noEmit && vite build && tsc -p electron/tsconfig.json",
+    "start": "npm run dev",
+    "package": "electron-builder --win --x64",
+    "package:dir": "electron-builder --win --x64 --dir"
+  },
+  "dependencies": {
+    "@fluentui/react-components": "^9.69.0",
+    "@fluentui/react-icons": "^2.0.303",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.0",
+    "electron": "^37.2.4",
+    "electron-builder": "^26.8.1",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.6",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.rkvtandco.itaxreplyagent",
+    "productName": "Income Tax Legal Reply Agent",
+    "asar": true,
+    "compression": "normal",
+    "directories": {
+      "output": "../dist",
+      "buildResources": "../installer"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist-backend/backend.exe",
+        "to": "backend.exe"
+      },
+      {
+        "from": "assets/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "win": {
+      "icon": "../installer/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ITaxReplyAgent-Setup.${ext}",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ITax Reply Agent",
+      "menuCategory": "ITaxReplyAgent",
+      "uninstallDisplayName": "Income Tax Legal Reply Agent",
+      "include": "../installer/installer.nsh",
+      "warningsAsErrors": false
+    }
+  }
+}

@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from paths import (
+    RAG_DOCS_DIR,
     RAG_SYNC_STATUS,
     ensure_dirs,
     get_rag_logger,
@@ -86,6 +87,48 @@ def get_status() -> dict[str, Any]:
         "last_sync_status": raw.get("last_sync_status") or "never",
         "errors": list(raw.get("errors") or []),
     }
+
+
+def clear_dedup_cache() -> dict[str, Any]:
+    """Wipe the scrape dedup state so the next sync re-fetches everything.
+
+    Called by ``POST /rag/reindex``. ``sync_status.json`` holds the
+    ``known_urls`` set the scraper uses to skip already-downloaded Indian
+    Kanoon documents; after a reindex that set is stale and would make the
+    next sync fetch nothing. To force a clean re-fetch we:
+
+    * delete ``sync_status.json`` entirely — ``known_urls`` resets to empty;
+    * delete every IK-fetched ``.txt`` file under ``RAG_DOCS_DIR`` (and its
+      subfolders) so the scraper re-downloads them. ``.pdf`` files — added
+      manually by the user — are left in place.
+
+    Returns ``{"status_cleared": bool, "txt_removed": int}``. Never raises:
+    a filesystem error is logged and reflected in the returned counts.
+    """
+    status_cleared = False
+    try:
+        if RAG_SYNC_STATUS.exists():
+            RAG_SYNC_STATUS.unlink()
+            status_cleared = True
+            log.info("[reindex] cleared sync_status.json — known_urls reset")
+    except OSError as e:
+        log.warning("[reindex] could not delete sync_status.json: %s", e)
+
+    txt_removed = 0
+    try:
+        for txt in RAG_DOCS_DIR.rglob("*.txt"):
+            try:
+                txt.unlink()
+                txt_removed += 1
+            except OSError as e:
+                log.warning("[reindex] could not delete %s: %s", txt.name, e)
+    except OSError as e:
+        log.warning("[reindex] could not scan %s for .txt files: %s", RAG_DOCS_DIR, e)
+    log.info(
+        "[reindex] removed %d IK text files — will re-fetch on next sync", txt_removed
+    )
+
+    return {"status_cleared": status_cleared, "txt_removed": txt_removed}
 
 
 # ---------------------------------------------------------------------------

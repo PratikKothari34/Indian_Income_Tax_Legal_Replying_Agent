@@ -71,6 +71,10 @@ async def rag_reindex() -> dict[str, str]:
     schema. Useful after improving supersession logic or after a vector
     store corruption. Returns immediately; progress is visible via
     ``GET /rag/status`` (``chunks_total`` will rise as the work completes).
+
+    The reindex also clears the scrape dedup cache (``sync_status.json``
+    plus the IK-fetched ``.txt`` files), so the next sync re-downloads
+    every Indian Kanoon document fresh — no manual steps needed.
     """
     # SECURITY: this endpoint is unauthenticated and destructive (it wipes
     # the vector store). It is safe only because the backend binds to
@@ -79,10 +83,15 @@ async def rag_reindex() -> dict[str, str]:
     def _reindex_blocking() -> None:
         try:
             rag_embedder.clear_collection()
+            # Clearing chromadb leaves sync_status.json's known_urls set
+            # stale — the next sync would skip every already-fetched IK
+            # document and add nothing. Drop the dedup cache so the next
+            # sync re-fetches the IK corpus from scratch.
+            rag_scheduler.clear_dedup_cache()
             rag_embedder.reembed_local_pdfs()
             rag_embedder.detect_supersessions()
         except Exception:
-            # All three helpers log internally; we swallow here so the
+            # All helpers log internally; we swallow here so the
             # background task never explodes the event loop.
             pass
 

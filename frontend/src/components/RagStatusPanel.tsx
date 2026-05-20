@@ -209,66 +209,97 @@ export function RagStatusPanel() {
         Reference Library (RAG)
       </Text>
       <Text size={200} className="mutedText">
-        Manual ingestion. Download CBDT documents as PDFs from
-        incometaxindia.gov.in and drop them in the folder below.
+        Legal documents auto-synced daily via Indian Kanoon API.
       </Text>
 
-      <div style={{ marginTop: 16 }}>
-        <Text weight="semibold">Drop CBDT circulars and notifications as PDF files into:</Text>
-      </div>
       <div
-        className="monoBox"
         style={{
-          marginTop: 8,
-          padding: 10,
-          fontFamily: "Consolas, monospace",
-          fontSize: 13,
-          wordBreak: "break-all"
+          display: "grid",
+          gap: 12,
+          marginTop: 16,
+          padding: 16,
+          border: "1px solid var(--outline)",
+          borderRadius: 8,
+          background: "var(--surface-high, rgba(255, 255, 255, 0.04))"
         }}
       >
-        {folder?.path ?? "(unknown)"}
-      </div>
-      <div style={{ marginTop: 6 }}>
-        <Text size={200} className="mutedText">
-          Then click <strong>Sync</strong> to index them.
-        </Text>
-      </div>
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 12px", alignItems: "center" }}>
+          <span
+            aria-hidden="true"
+            style={{
+              width: 9,
+              height: 9,
+              borderRadius: "999px",
+              background:
+                status?.last_sync_status === "failed"
+                  ? "var(--colorPaletteRedForeground1, #dc2626)"
+                  : status?.last_sync_status === "success"
+                    ? "var(--colorPaletteGreenForeground1, #15803d)"
+                    : "var(--colorPaletteYellowForeground2, #b45309)"
+            }}
+          />
+          <Text weight="semibold">
+            Last sync: {formatTimestamp(status?.last_sync ?? null)}
+            {status?.last_sync_status && status.last_sync_status !== "never"
+              ? ` (${status.last_sync_status})`
+              : ""}
+          </Text>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <Button
-          appearance="primary"
-          disabled={syncing || reindexing || !status?.embedding_model_available}
-          onClick={() => void handleSync()}
-        >
-          {syncing ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Spinner size="tiny" />
-              Syncing...
-            </span>
-          ) : (
-            "Sync now"
+          <Text weight="semibold">Documents indexed:</Text>
+          <Text>{status?.docs_total ?? 0}</Text>
+
+          <Text weight="semibold">Chunks in vector store:</Text>
+          <Text>{status?.chunks_total ?? 0}</Text>
+
+          <Text weight="semibold">Added last run:</Text>
+          <Text>{status?.docs_added_last_run ?? 0}</Text>
+
+          <Text weight="semibold">Next scheduled sync:</Text>
+          <Text>{formatTimestamp(status?.next_scheduled_sync ?? null)}</Text>
+
+          {(status?.superseded_docs ?? 0) > 0 && (
+            <>
+              <Text weight="semibold">Superseded documents:</Text>
+              <Text style={{ color: "var(--colorPaletteMarigoldForeground2, #8a6d3b)" }}>
+                {status?.superseded_docs ?? 0}
+              </Text>
+            </>
           )}
-        </Button>
-        <Button
-          appearance="secondary"
-          disabled={syncing || reindexing || !status?.embedding_model_available}
-          onClick={() => void handleReindex()}
-        >
-          {reindexing ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Spinner size="tiny" />
-              Re-indexing...
-            </span>
-          ) : (
-            "Re-index"
-          )}
-        </Button>
-        <Button appearance="secondary" disabled={!folder?.path} onClick={() => void copyFolderPath()}>
-          Copy path
-        </Button>
-        <Button appearance="secondary" onClick={() => void refresh()}>
-          Refresh
-        </Button>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <Button
+            appearance="primary"
+            disabled={syncing || reindexing || !status?.embedding_model_available}
+            onClick={() => void handleSync()}
+          >
+            {syncing ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Spinner size="tiny" />
+                Syncing...
+              </span>
+            ) : (
+              "Sync now"
+            )}
+          </Button>
+          <Button
+            appearance="secondary"
+            disabled={syncing || reindexing || !status?.embedding_model_available}
+            onClick={() => void handleReindex()}
+          >
+            {reindexing ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Spinner size="tiny" />
+                Re-indexing...
+              </span>
+            ) : (
+              "Re-index"
+            )}
+          </Button>
+          <Button appearance="secondary" onClick={() => void refresh()}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {!status?.embedding_model_available && (
@@ -287,36 +318,35 @@ export function RagStatusPanel() {
         </div>
       )}
 
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 16px" }}>
-        <Text weight="semibold">Last sync:</Text>
-        <Text>
-          {formatTimestamp(status?.last_sync ?? null)}
-          {status?.last_sync_status && status.last_sync_status !== "never"
-            ? ` (${status.last_sync_status})`
-            : ""}
-        </Text>
-
-        <Text weight="semibold">Documents indexed:</Text>
-        <Text>{status?.docs_total ?? 0}</Text>
-
-        {(status?.superseded_docs ?? 0) > 0 && (
-          <>
-            <Text weight="semibold">Superseded documents:</Text>
-            <Text style={{ color: "var(--colorPaletteMarigoldForeground2, #8a6d3b)" }}>
-              {status?.superseded_docs ?? 0}
+      <details style={{ marginTop: 12 }}>
+        <summary>
+          <Text>➕ Add custom documents (optional)</Text>
+        </summary>
+        <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+          <Text size={200} className="mutedText">
+            Drop additional PDFs (CBDT circulars, notifications) for manual indexing alongside auto-synced content.
+          </Text>
+          <div
+            className="monoBox"
+            style={{
+              padding: 10,
+              fontFamily: "Consolas, monospace",
+              fontSize: 13,
+              wordBreak: "break-all"
+            }}
+          >
+            {folder?.path ?? "(unknown)"}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <Button appearance="secondary" disabled={!folder?.path} onClick={() => void copyFolderPath()}>
+              Copy path
+            </Button>
+            <Text size={200} className="mutedText">
+              Then click <strong>Sync</strong> to index them.
             </Text>
-          </>
-        )}
-
-        <Text weight="semibold">Chunks in vector store:</Text>
-        <Text>{status?.chunks_total ?? 0}</Text>
-
-        <Text weight="semibold">Added last run:</Text>
-        <Text>{status?.docs_added_last_run ?? 0}</Text>
-
-        <Text weight="semibold">Next scheduled sync:</Text>
-        <Text>{formatTimestamp(status?.next_scheduled_sync ?? null)}</Text>
-      </div>
+          </div>
+        </div>
+      </details>
 
       {status?.errors && status.errors.length > 0 && (
         <details style={{ marginTop: 12 }}>

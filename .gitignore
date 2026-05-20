@@ -41,3 +41,10 @@ desktop.ini
 # IDE
 .vscode/
 .idea/
+
+# Debug dumps
+backend/rag/debug_*.html
+backend/rag/debug_*.png
+
+# Project-root screenshots
+/*.png

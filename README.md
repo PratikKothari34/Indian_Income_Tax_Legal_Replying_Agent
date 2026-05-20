@@ -141,11 +141,10 @@ The app automatically syncs legal documents daily at noon:
 - IT Act 1961 (key sections)
 - Finance Acts
 - IT Rules 1962
-- CBDT circulars/notifications (manual PDF drop)
+- CBDT circulars/notifications (auto-fetched via Indian Kanoon)
 
-To add CBDT circulars manually:
-Drop PDFs into `AppData\Local\ITaxReplyAgent\rag\docs\`
-then click **Sync now** in the RAG Library panel.
+Documents are fetched automatically daily at noon via the
+Indian Kanoon API. No manual steps required after initial setup.
 
 ---
 

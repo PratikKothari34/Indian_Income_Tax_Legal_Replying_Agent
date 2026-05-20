@@ -48,3 +48,15 @@ backend/rag/debug_*.png
 
 # Project-root screenshots
 /*.png
+
+# Frontend build cache
+frontend/.vite/
+frontend/dist/
+frontend/build/
+frontend/out/
+
+# Electron build cache
+frontend/win-unpacked/
+
+# Type declaration cache
+frontend/**/*.tsbuildinfo

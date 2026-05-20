@@ -39,10 +39,11 @@ candidate that is locally pulled AND returns a non-empty response wins.
 """
 
 import logging
+import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from services.docx_writer import save_reply_docx
 from services.ollama_client import OllamaUnavailable, chat
@@ -51,6 +52,11 @@ from services.session_store import append_turn
 
 router = APIRouter()
 log = logging.getLogger("itax.generate")
+
+#: session_id is interpolated into a JSON filename by services.session_store.
+#: Constrain it to a safe character set so a traversal payload cannot
+#: escape backend/data/. Must mirror session_store._SESSION_ID_RE.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +160,20 @@ class GenerateRequest(BaseModel):
     history: list[HistoryTurn] | None = Field(default=None, description="Prior turns of this session")
     session_id: str | None = Field(default=None, description="Existing session id to append to")
     temperature: float = Field(0.2, ge=0.0, le=1.0)
+
+    @field_validator("session_id")
+    @classmethod
+    def _check_session_id(cls, v: str | None) -> str | None:
+        """Reject a session_id that could escape backend/data/.
+
+        ``None`` / ``""`` are allowed — both mean "start a new session";
+        session_store then mints a fresh 12-hex id.
+        """
+        if v in (None, ""):
+            return v
+        if not _SESSION_ID_RE.fullmatch(v):
+            raise ValueError("session_id must be 1-64 characters of [A-Za-z0-9_-]")
+        return v
     save_output: bool = Field(
         False,
         description="When True, persist the reply as a .docx in backend/output/ and return its path. Defaults to False — callers that only need the text body can skip the disk write entirely.",

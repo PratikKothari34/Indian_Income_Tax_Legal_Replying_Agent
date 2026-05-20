@@ -36,14 +36,24 @@ Why JSON-on-disk and not a database?
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from paths import DATA_DIR
 
+#: A session id is either a generated 12-hex token or a caller-supplied
+#: value continuing an existing conversation. It is interpolated straight
+#: into a filename, so it must be constrained to a safe character set —
+#: an unvalidated id such as "../../../config" would escape DATA_DIR and
+#: let a client write a JSON file anywhere on disk.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
 
 def _path_for(session_id: str) -> Path:
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        raise ValueError(f"Invalid session id: {session_id!r}")
     return DATA_DIR / f"session_{session_id}.json"
 
 

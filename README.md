@@ -228,7 +228,7 @@ See [LICENSE](LICENSE) for details.
 
 ## Author
 
-**Pratik Kothari**
+**Pratik V Kothari**
 - GitHub: [@PratikKothari34](https://github.com/PratikKothari34)
 - Firm: RKVT AND CO, Chartered Accountants, Chennai
 

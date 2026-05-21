@@ -31,12 +31,6 @@
 
 ---
 
-## Screenshots
-
-> Screenshots coming soon
-
----
-
 ## Tech Stack
 
 | Layer | Technology |

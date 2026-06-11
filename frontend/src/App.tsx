@@ -695,10 +695,7 @@ export function App() {
                       </Text>
                     </div>
                     <Text size={200} className="mutedText" style={{ marginTop: "6px", display: "block" }}>
-                      Controls reply variability. Lower (0.0–0.3) is deterministic and
-                      best for citation-heavy drafts. Higher (0.7–1.0) varies phrasing
-                      and is useful when regenerating to explore alternatives. The model
-                      itself is auto-selected from system resources and notice complexity.
+                      Lower (0.0–0.3) deterministic, higher (0.7–1.0) varied. Model auto-selected.
                     </Text>
                   </div>
 

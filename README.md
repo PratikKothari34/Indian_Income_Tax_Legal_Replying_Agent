@@ -117,6 +117,25 @@ At ₹0.20/document this covers ~50,000 document fetches/month.
 5. Review the generated reply
 6. Click **Save as .docx** when satisfied
 
+### Temperature
+
+The Temperature slider controls how varied the LLM's wording is on each
+generation. Range is 0.0–1.0; the app defaults to 0.7.
+
+- **0.0–0.3** — deterministic and conservative. The same notice produces
+  near-identical replies on repeated generations. Recommended when
+  citation accuracy and consistent tone matter most (most legal drafting).
+- **0.4–0.6** — balanced. Slight variation in phrasing while still
+  staying close to the model's most-likely wording.
+- **0.7–1.0** — more varied. Useful when regenerating to explore an
+  alternative draft, but raises the risk of looser citation discipline.
+
+> Model selection is automatic — the backend chooses between
+> `qwen2.5:14b` (default) and `deepseek-r1:14b` (complex notices —
+> reassessment, search-and-seizure, penalty, transfer pricing, etc.)
+> based on available VRAM/RAM and notice complexity. No manual model
+> selection is needed.
+
 ### Supported Notice Types
 - Section 143(1) — Intimation
 - Section 143(2) — Scrutiny

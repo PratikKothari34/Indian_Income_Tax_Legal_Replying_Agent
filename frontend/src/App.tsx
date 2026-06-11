@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
-  Dropdown,
   FluentProvider,
   Label,
-  Option,
   Slider,
   Spinner,
   Text,
@@ -31,20 +29,18 @@ import { RagStatusPanel } from "./components/RagStatusPanel";
 import { ReplyViewer } from "./components/ReplyViewer";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { UploadPanel } from "./components/UploadPanel";
-import { generateReply, getHealth, getModels, pickDefaultModel } from "./lib/api";
+import { generateReply, getHealth } from "./lib/api";
 import { formatSessionTime, latestTurn, newSessionId, sessionToHistory } from "./lib/session";
 import type {
   GenerateResponse,
   HealthResponse,
   HistoryTurn,
-  ModelInfo,
   SessionSummary,
   UploadError,
   UploadResponse
 } from "./types/api";
 
 const THEME_KEY = "itax-agent-theme";
-const MODEL_KEY = "itax-agent-model";
 const TEMP_KEY = "temperature";
 const SESSION_KEY = "itax-agent-session-id";
 const orangeLightTheme = {
@@ -70,7 +66,7 @@ const orangeLightTheme = {
 type GeneratePayload = {
   text: string;
   query: string;
-  model: string;
+  model: string | null;
   history: HistoryTurn[];
   session_id: string;
   temperature: number;
@@ -112,8 +108,6 @@ export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
   const [healthDismissed, setHealthDismissed] = useState(false);
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? "");
   const [temperature, setTemperature] = useState(() => {
     const stored = parseFloat(localStorage.getItem(TEMP_KEY) ?? "0.7");
     return Number.isNaN(stored) || stored === 0 ? 0.7 : stored;
@@ -167,12 +161,6 @@ export function App() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (selectedModel) {
-      localStorage.setItem(MODEL_KEY, selectedModel);
-    }
-  }, [selectedModel]);
-
-  useEffect(() => {
     if (!savedOutputFile) {
       return;
     }
@@ -192,28 +180,15 @@ export function App() {
     async function loadStartupData() {
       setHealthLoading(true);
       try {
-        const [healthResult, modelResult] = await Promise.allSettled([getHealth(), getModels()]);
-        if (!mounted) {
-          return;
-        }
-
-        if (healthResult.status === "fulfilled") {
-          setHealth(healthResult.value);
-        } else {
-          setHealth({
+        const healthResult = await getHealth().catch(() => null);
+        if (!mounted) return;
+        setHealth(
+          healthResult ?? {
             ollama_running: false,
             primary_model: "qwen2.5:14b",
             fallback_model: "deepseek-r1:14b"
-          });
-        }
-
-        if (modelResult.status === "fulfilled") {
-          setModels(modelResult.value);
-          setSelectedModel((current) => {
-            const modelNames = new Set(modelResult.value.map((model) => model.name));
-            return current && modelNames.has(current) ? current : pickDefaultModel(modelResult.value);
-          });
-        }
+          }
+        );
       } finally {
         if (mounted) {
           setHealthLoading(false);
@@ -269,10 +244,9 @@ export function App() {
       generating ||
       uploading ||
       uploadError !== null ||
-      !selectedModel ||
       (!hasUploadedText && !query.trim())
     );
-  }, [generating, query, selectedModel, uploadError, uploadedDocuments, uploading]);
+  }, [generating, query, uploadError, uploadedDocuments, uploading]);
 
   function handleNewSession() {
     const nextId = newSessionId();
@@ -328,7 +302,7 @@ export function App() {
           ? {
               text: last.notice_text ?? "",
               query: last.query,
-              model: last.model,
+              model: null,
               history: priorHistory,
               session_id: session.session_id,
               temperature
@@ -337,9 +311,6 @@ export function App() {
       );
       setSavedOutputFile(null);
       setSaveError(null);
-      if (last?.model) {
-        setSelectedModel(last.model);
-      }
     } catch {
       setGenerateError("Could not load selected session.");
     }
@@ -389,7 +360,7 @@ export function App() {
     const request: GeneratePayload = {
       text: combinedText,
       query,
-      model: selectedModel,
+      model: null,
       history,
       session_id: sessionId,
       temperature
@@ -706,25 +677,7 @@ export function App() {
                     placeholder="Draft a formal para-wise response to the notice..."
                   />
 
-                  <div style={{ display: "flex", gap: "24px", alignItems: "flex-start", width: "100%" }}>
-                    <div className="controlField" style={{ width: "200px", minWidth: 0, flex: "0 0 200px" }}>
-                      <Label htmlFor="model">Model</Label>
-                      <Dropdown
-                        id="model"
-                        style={{ width: "200px", minWidth: 0, maxWidth: "200px" }}
-                        selectedOptions={selectedModel ? [selectedModel] : []}
-                        value={selectedModel || "No models found"}
-                        onOptionSelect={(_, data) => setSelectedModel(data.optionValue ?? "")}
-                      >
-                        {models.map((model) => (
-                          <Option key={model.name} value={model.name}>
-                            {model.name}
-                          </Option>
-                        ))}
-                      </Dropdown>
-                    </div>
-
-                  <div className="controlField" style={{ flex: 1, minWidth: 0 }}>
+                  <div className="controlField" style={{ width: "100%", minWidth: 0 }}>
                     <div className="sliderHeader">
                       <Label htmlFor="temperature">Temperature</Label>
                     </div>
@@ -732,8 +685,8 @@ export function App() {
                       <Slider
                         id="temperature"
                         min={0}
-                          max={1}
-                          step={0.1}
+                        max={1}
+                        step={0.1}
                         value={temperature}
                         onChange={(_, data) => setTemperature(data.value)}
                       />
@@ -741,7 +694,12 @@ export function App() {
                         {temperature.toFixed(1)}
                       </Text>
                     </div>
-                  </div>
+                    <Text size={200} className="mutedText" style={{ marginTop: "6px", display: "block" }}>
+                      Controls reply variability. Lower (0.0–0.3) is deterministic and
+                      best for citation-heavy drafts. Higher (0.7–1.0) varies phrasing
+                      and is useful when regenerating to explore alternatives. The model
+                      itself is auto-selected from system resources and notice complexity.
+                    </Text>
                   </div>
 
                   {generateError && (

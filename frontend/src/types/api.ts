@@ -36,7 +36,9 @@ export type HistoryTurn = {
 export type GenerateRequest = {
   text: string;
   query: string;
-  model: string;
+  // null lets the backend auto-select the LLM (qwen2.5:14b default,
+  // deepseek-r1:14b for complex notices) via ollama_client.chat.
+  model: string | null;
   history: HistoryTurn[];
   session_id: string;
   temperature: number;

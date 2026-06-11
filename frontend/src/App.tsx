@@ -523,13 +523,13 @@ export function App() {
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <span className="sessionId" style={{ display: "block" }}>
-                        {session.session_id}
+                        #{session.session_id.slice(0, 8)}
                       </span>
                       <span className="sessionMeta" style={{ display: "block" }}>
                         {formatSessionTime(session.updated_at || session.created_at)}
                       </span>
                       <span className="sessionMeta" style={{ display: "block" }}>
-                        {session.turn_count} turn{session.turn_count === 1 ? "" : "s"}
+                        {session.turn_count} {session.turn_count === 1 ? "reply" : "replies"}
                       </span>
                     </div>
                     <Button

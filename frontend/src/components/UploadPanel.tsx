@@ -41,9 +41,8 @@ export function UploadPanel({
     setIsUploading(true);
     onUploadingChange(true);
 
-    // Upload every selected file in parallel. Each /upload call goes
-    // through the backend's per-file size / magic-byte / traversal /
-    // XXE guards independently, so one bad file doesn't poison the rest.
+    // Each /upload call is independent — one bad file can't fail the
+    // whole batch, and every per-file backend guard still applies.
     const fileArray = Array.from(files);
     const settled = await Promise.allSettled(fileArray.map((f) => uploadFile(f)));
 

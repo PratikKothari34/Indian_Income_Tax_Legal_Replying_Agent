@@ -91,6 +91,24 @@ function normalizeReply(result: GenerateResult): GenerateResponse {
   };
 }
 
+// Multi-file context-block hardening. Filenames and extracted text are
+// interpolated into "=== FILE: <name> ===" / "=== END FILE: <name> ==="
+// sub-delimiters inside the prompt. Either side could carry text that
+// forges a boundary and smuggles instructions outside the document
+// sandbox — sanitise both before composition.
+const FILE_DELIMITER_RE = /===\s*(?:END\s+)?FILE\s*:[^\n]*===/gi;
+
+function sanitizeFilenameForPrompt(name: string): string {
+  return name
+    .replace(FILE_DELIMITER_RE, "[filtered]")
+    .replace(/[\r\n\t]+/g, " ")
+    .slice(0, 200);
+}
+
+function sanitizeTextForPrompt(text: string): string {
+  return text.replace(FILE_DELIMITER_RE, "[filtered]");
+}
+
 export function App() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -357,18 +375,19 @@ export function App() {
   }
 
   async function handleGenerate() {
-    // One file -> send its text verbatim (preserves existing single-file
-    // behaviour, including the "# Sheet:" detection in prompts.py).
-    // Multiple files -> wrap each in clear FILE delimiters so the model
-    // can keep the documents distinct inside the BEGIN/END DOCUMENT block.
+    // Single file → raw text (keeps the "# Sheet:" detection in prompts.py).
+    // Multi-file → wrap each in FILE delimiters so the model can keep
+    // documents distinct; sanitise both filename and text so a poisoned
+    // entry cannot forge a sub-boundary inside the document block.
     const combinedText =
       uploadedDocuments.length === 1
         ? uploadedDocuments[0].text
         : uploadedDocuments
-            .map(
-              (d) =>
-                `=== FILE: ${d.filename} ===\n${d.text}\n=== END FILE: ${d.filename} ===`
-            )
+            .map((d) => {
+              const safeName = sanitizeFilenameForPrompt(d.filename);
+              const safeText = sanitizeTextForPrompt(d.text);
+              return `=== FILE: ${safeName} ===\n${safeText}\n=== END FILE: ${safeName} ===`;
+            })
             .join("\n\n");
 
     const request: GeneratePayload = {

@@ -21,7 +21,8 @@
 - **RAG pipeline** — 2000+ chunks from IT Act 2025, IT Act 1961,
   Finance Acts, CBDT circulars indexed via Indian Kanoon API
 - **Auto-sync** — daily noon sync fetches latest legal updates
-- **Multi-format input** — PDF, DOCX, XLS, XLSX, JPG, PNG
+- **Multi-file, multi-format input** — drop a notice plus computation
+  sheets and supporting docs in one go (PDF, DOCX, XLS, XLSX, JPG, PNG)
 - **Excel-aware** — understands computation sheets, Form 26AS,
   TDS reconciliation data
 - **Save as .docx** — formal letter output in Times New Roman
@@ -110,7 +111,7 @@ At ₹0.20/document this covers ~50,000 document fetches/month.
 ## Usage
 
 1. Launch app (or find in system tray)
-2. Upload notice: PDF, DOCX, XLS, XLSX, JPG, or PNG
+2. Drop one or more case files (notice, computation, 26AS, etc.) — PDF, DOCX, XLS, XLSX, JPG, or PNG
 3. Type query: "Draft a formal para-wise reply to this notice"
 4. Click **Generate Reply**
 5. Review the generated reply

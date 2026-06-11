@@ -91,11 +91,9 @@ function normalizeReply(result: GenerateResult): GenerateResponse {
   };
 }
 
-// Multi-file context-block hardening. Filenames and extracted text are
-// interpolated into "=== FILE: <name> ===" / "=== END FILE: <name> ==="
-// sub-delimiters inside the prompt. Either side could carry text that
-// forges a boundary and smuggles instructions outside the document
-// sandbox — sanitise both before composition.
+// Multi-file context block uses "=== FILE: <name> ===" sub-delimiters.
+// A forged delimiter (in a filename or in extracted text) could smuggle
+// instructions outside the document sandbox — sanitise both sides.
 const FILE_DELIMITER_RE = /===\s*(?:END\s+)?FILE\s*:[^\n]*===/gi;
 
 function sanitizeFilenameForPrompt(name: string): string {
@@ -375,10 +373,8 @@ export function App() {
   }
 
   async function handleGenerate() {
-    // Single file → raw text (keeps the "# Sheet:" detection in prompts.py).
-    // Multi-file → wrap each in FILE delimiters so the model can keep
-    // documents distinct; sanitise both filename and text so a poisoned
-    // entry cannot forge a sub-boundary inside the document block.
+    // Single file → raw text (preserves the "# Sheet:" Excel detection in
+    // prompts.py). Multi-file → wrap each in sanitised FILE delimiters.
     const combinedText =
       uploadedDocuments.length === 1
         ? uploadedDocuments[0].text

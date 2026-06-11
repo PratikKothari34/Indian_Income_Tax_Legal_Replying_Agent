@@ -696,6 +696,8 @@ export function App() {
                     </div>
                     <Text size={200} className="mutedText" style={{ marginTop: "6px", display: "block" }}>
                       Lower (0.0–0.3) = same reply every time, recommended for drafts.
+                    </Text>
+                    <Text size={200} className="mutedText" style={{ display: "block" }}>
                       Higher (0.7–1.0) = varied wording on each regenerate.
                     </Text>
                   </div>

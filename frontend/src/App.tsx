@@ -105,7 +105,7 @@ export function App() {
   const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY) ?? newSessionId());
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [history, setHistory] = useState<HistoryTurn[]>([]);
-  const [uploadedDocument, setUploadedDocument] = useState<UploadResponse | null>(null);
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadResponse[]>([]);
   const [uploadError, setUploadError] = useState<UploadError | null>(null);
   const [uploading, setUploading] = useState(false);
   const [query, setQuery] = useState("");
@@ -248,20 +248,21 @@ export function App() {
   }, [embeddingModelReady]);
 
   const generateDisabled = useMemo(() => {
+    const hasUploadedText = uploadedDocuments.some((d) => d.text.trim().length > 0);
     return (
       generating ||
       uploading ||
       uploadError !== null ||
       !selectedModel ||
-      (!uploadedDocument?.text.trim() && !query.trim())
+      (!hasUploadedText && !query.trim())
     );
-  }, [generating, query, selectedModel, uploadError, uploadedDocument?.text, uploading]);
+  }, [generating, query, selectedModel, uploadError, uploadedDocuments, uploading]);
 
   function handleNewSession() {
     const nextId = newSessionId();
     setSessionId(nextId);
     setHistory([]);
-    setUploadedDocument(null);
+    setUploadedDocuments([]);
     setUploadError(null);
     setUploading(false);
     setQuery("");
@@ -286,13 +287,15 @@ export function App() {
       setSessionId(session.session_id);
       setHistory(loadedHistory);
       setQuery(last?.query ?? "");
-      setUploadedDocument(
+      setUploadedDocuments(
         last?.notice_text
-          ? {
-              filename: `Session ${session.session_id}`,
-              text: last.notice_text
-            }
-          : null
+          ? [
+              {
+                filename: `Session ${session.session_id}`,
+                text: last.notice_text
+              }
+            ]
+          : []
       );
       setReply(
         last
@@ -354,8 +357,22 @@ export function App() {
   }
 
   async function handleGenerate() {
+    // One file -> send its text verbatim (preserves existing single-file
+    // behaviour, including the "# Sheet:" detection in prompts.py).
+    // Multiple files -> wrap each in clear FILE delimiters so the model
+    // can keep the documents distinct inside the BEGIN/END DOCUMENT block.
+    const combinedText =
+      uploadedDocuments.length === 1
+        ? uploadedDocuments[0].text
+        : uploadedDocuments
+            .map(
+              (d) =>
+                `=== FILE: ${d.filename} ===\n${d.text}\n=== END FILE: ${d.filename} ===`
+            )
+            .join("\n\n");
+
     const request: GeneratePayload = {
-      text: uploadedDocument?.text ?? "",
+      text: combinedText,
       query,
       model: selectedModel,
       history,
@@ -633,10 +650,21 @@ export function App() {
                 </div>
 
                 <UploadPanel
-                  uploadedDocument={uploadedDocument}
-                  onUploaded={(document) => {
-                    setUploadedDocument(document);
+                  uploadedDocuments={uploadedDocuments}
+                  onAddDocuments={(documents) => {
+                    setUploadedDocuments((prev) => {
+                      // Merge by filename so re-uploading the same name
+                      // replaces (rather than duplicates) the entry.
+                      const map = new Map(prev.map((d) => [d.filename, d]));
+                      for (const d of documents) map.set(d.filename, d);
+                      return Array.from(map.values());
+                    });
                     setGenerateError(null);
+                  }}
+                  onRemoveDocument={(filename) => {
+                    setUploadedDocuments((prev) =>
+                      prev.filter((d) => d.filename !== filename)
+                    );
                   }}
                   onUploadErrorChange={setUploadError}
                   onUploadingChange={setUploading}

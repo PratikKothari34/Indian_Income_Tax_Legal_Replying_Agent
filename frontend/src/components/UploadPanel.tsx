@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Spinner, Text } from "@fluentui/react-components";
 import {
   ArrowUpload24Regular,
+  Dismiss20Regular,
   Document24Regular,
   ErrorCircle24Regular
 } from "@fluentui/react-icons";
@@ -11,15 +12,17 @@ import type { UploadError, UploadResponse } from "../types/api";
 const ACCEPTED_TYPES = ".pdf,.docx,.xls,.xlsx,.jpg,.jpeg,.png";
 
 type UploadPanelProps = {
-  uploadedDocument: UploadResponse | null;
-  onUploaded: (response: UploadResponse) => void;
+  uploadedDocuments: UploadResponse[];
+  onAddDocuments: (responses: UploadResponse[]) => void;
+  onRemoveDocument: (filename: string) => void;
   onUploadErrorChange: (error: UploadError | null) => void;
   onUploadingChange: (uploading: boolean) => void;
 };
 
 export function UploadPanel({
-  uploadedDocument,
-  onUploaded,
+  uploadedDocuments,
+  onAddDocuments,
+  onRemoveDocument,
   onUploadErrorChange,
   onUploadingChange
 }: UploadPanelProps) {
@@ -32,31 +35,51 @@ export function UploadPanel({
     onUploadErrorChange(uploadError);
   }, [onUploadErrorChange, uploadError]);
 
-  async function handleFile(file: File) {
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
     setUploadError(null);
     setIsUploading(true);
     onUploadingChange(true);
 
-    try {
-      const response = await uploadFile(file);
-      onUploaded(response);
-    } catch (error) {
-      const typedError =
-        typeof error === "object" && error !== null && "message" in error
-          ? (error as UploadError)
-          : ({ code: "unknown", message: "Upload failed" } as UploadError);
-      setUploadError(typedError);
-    } finally {
-      setIsUploading(false);
-      onUploadingChange(false);
-    }
-  }
+    // Upload every selected file in parallel. Each /upload call goes
+    // through the backend's per-file size / magic-byte / traversal /
+    // XXE guards independently, so one bad file doesn't poison the rest.
+    const fileArray = Array.from(files);
+    const settled = await Promise.allSettled(fileArray.map((f) => uploadFile(f)));
 
-  function handleFiles(files: FileList | null) {
-    const file = files?.item(0);
-    if (file) {
-      void handleFile(file);
+    const successes: UploadResponse[] = [];
+    const failures: { name: string; error: UploadError }[] = [];
+    settled.forEach((result, i) => {
+      const name = fileArray[i]?.name ?? "(unknown)";
+      if (result.status === "fulfilled") {
+        successes.push(result.value);
+      } else {
+        const reason = result.reason;
+        const error: UploadError =
+          typeof reason === "object" &&
+          reason !== null &&
+          "code" in reason &&
+          "message" in reason
+            ? (reason as UploadError)
+            : { code: "unknown", message: "Upload failed" };
+        failures.push({ name, error });
+      }
+    });
+
+    if (successes.length > 0) {
+      onAddDocuments(successes);
     }
+    if (failures.length > 0) {
+      const first = failures[0];
+      const message =
+        failures.length === 1
+          ? `${first.name}: ${first.error.message}`
+          : `${failures.length} files failed (first: ${first.name} — ${first.error.message})`;
+      setUploadError({ code: first.error.code, message, detail: first.error.detail });
+    }
+
+    setIsUploading(false);
+    onUploadingChange(false);
   }
 
   return (
@@ -88,17 +111,18 @@ export function UploadPanel({
           event.preventDefault();
           setIsDragging(false);
           setUploadError(null);
-          handleFiles(event.dataTransfer.files);
+          void handleFiles(event.dataTransfer.files);
         }}
       >
         <input
           ref={inputRef}
           accept={ACCEPTED_TYPES}
           className="fileInput"
+          multiple
           type="file"
           onChange={(event) => {
             setUploadError(null);
-            handleFiles(event.target.files);
+            void handleFiles(event.target.files);
             event.currentTarget.value = "";
           }}
         />
@@ -121,16 +145,38 @@ export function UploadPanel({
         </div>
       )}
 
-      {uploadedDocument && !uploadError && (
-        <div className="documentPreview">
-          <div className="documentTitle">
-            <Document24Regular />
-            <Text weight="semibold">{uploadedDocument.filename}</Text>
-          </div>
-          <div className="previewText">
-            {uploadedDocument.text.slice(0, 300)}
-            {uploadedDocument.text.length > 300 ? "..." : ""}
-          </div>
+      {uploadedDocuments.length > 0 && (
+        <div className="documentPreviewList">
+          {uploadedDocuments.map((doc) => (
+            <div className="documentPreview" key={doc.filename}>
+              <div className="documentTitle">
+                <Document24Regular />
+                <Text
+                  weight="semibold"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap"
+                  }}
+                >
+                  {doc.filename}
+                </Text>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  aria-label={`Remove ${doc.filename}`}
+                  icon={<Dismiss20Regular />}
+                  onClick={() => onRemoveDocument(doc.filename)}
+                />
+              </div>
+              <div className="previewText">
+                {doc.text.slice(0, 300)}
+                {doc.text.length > 300 ? "..." : ""}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </section>

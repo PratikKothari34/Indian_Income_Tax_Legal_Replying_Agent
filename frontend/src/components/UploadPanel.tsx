@@ -127,10 +127,10 @@ export function UploadPanel({
             <Document24Regular />
             <Text weight="semibold">{uploadedDocument.filename}</Text>
           </div>
-          <Text className="previewText">
+          <div className="previewText">
             {uploadedDocument.text.slice(0, 300)}
             {uploadedDocument.text.length > 300 ? "..." : ""}
-          </Text>
+          </div>
         </div>
       )}
     </section>

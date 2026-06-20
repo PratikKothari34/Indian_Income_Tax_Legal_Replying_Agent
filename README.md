@@ -17,9 +17,10 @@
 
 - **Fully local** — no data leaves your machine, no cloud API
 - **LLM-powered replies** — qwen2.5:14b for standard notices,
-  deepseek-r1:14b for complex cases (auto-selected)
-- **RAG pipeline** — 2000+ chunks from IT Act 2025, IT Act 1961,
-  Finance Acts, CBDT circulars indexed via Indian Kanoon API
+  deepseek-r1:14b auto-selected for complex cases (reassessment,
+  search & seizure, penalty, transfer pricing, DTAA, etc.)
+- **RAG pipeline** — IT Act 2025, IT Act 1961, Finance Acts,
+  IT Rules 1962 and CBDT circulars auto-indexed via Indian Kanoon
 - **Auto-sync** — daily noon sync fetches latest legal updates
 - **Multi-file, multi-format input** — drop a notice plus computation
   sheets and supporting docs in one go (PDF, DOCX, XLS, XLSX, JPG, PNG)
@@ -38,7 +39,7 @@
 |---|---|
 | Frontend | Electron 37 + React + TypeScript + Vite |
 | Backend | Python 3.11 + FastAPI + Uvicorn |
-| LLM | Ollama (qwen2.5:14b + deepseek-r1:14b) |
+| LLM | Ollama (qwen2.5:14b primary, deepseek-r1:14b auto-fallback) |
 | RAG | ChromaDB + sentence-transformers (all-MiniLM-L6-v2) |
 | Legal Data | Indian Kanoon API |
 | OCR | Tesseract |
@@ -145,6 +146,18 @@ generation. Range is 0.0–1.0; the app defaults to 0.7.
 - Search and seizure notices
 - TDS/TCS discrepancy notices
 - DTAA and transfer pricing matters
+
+---
+
+## Screenshots
+
+**Drafting session — case file upload and legal query**
+
+![Drafting session — upload and query](docs/screenshots/upload-view.png)
+
+**Generated reply view**
+
+![Generated reply](docs/screenshots/drafting-session.png)
 
 ---
 

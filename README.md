@@ -21,13 +21,14 @@
   search & seizure, penalty, transfer pricing, DTAA, etc.)
 - **RAG pipeline** — IT Act 2025, IT Act 1961, Finance Acts,
   IT Rules 1962 and CBDT circulars auto-indexed via Indian Kanoon
-- **Auto-sync** — daily noon sync fetches latest legal updates
+- **Auto-sync** — scheduled daily sync (default noon, configurable
+  via cron expression) fetches the latest legal updates
 - **Multi-file, multi-format input** — drop a notice plus computation
   sheets and supporting docs in one go (PDF, DOCX, XLS, XLSX, JPG, PNG)
-- **Excel-aware** — understands computation sheets, Form 26AS,
-  TDS reconciliation data
+- **Excel-aware** — extracts text from computation sheets,
+  Form 26AS, AIS/TIS, and TDS reconciliations (.xls + .xlsx)
 - **Save as .docx** — formal letter output in Times New Roman
-- **System tray** — runs in background, syncs at noon daily
+- **System tray** — minimises to tray and keeps the scheduler alive
 - **Security hardened** — path traversal, XXE, prompt injection,
   RAG poisoning protections
 
@@ -37,7 +38,7 @@
 
 | Layer | Technology |
 |---|---|
-| Frontend | Electron 37 + React + TypeScript + Vite |
+| Frontend | Electron 37 + React 19 + TypeScript + Vite 7 + Fluent UI v9 |
 | Backend | Python 3.11 + FastAPI + Uvicorn |
 | LLM | Ollama (qwen2.5:14b primary, deepseek-r1:14b auto-fallback) |
 | RAG | ChromaDB + sentence-transformers (all-MiniLM-L6-v2) |
@@ -51,16 +52,19 @@
 
 ### Build machine (developer)
 - Windows 10/11 x64
-- Python 3.10+ in PATH
-- Node.js 24.x in PATH
-- Tesseract OCR from UB Mannheim at default path
+- Python 3.11+ in PATH
+- Node.js 20+ in PATH (24.x tested)
+- Tesseract OCR from UB Mannheim at the default install path
 - Internet connection
 
 ### Deploy machine (end user)
 - Windows 10/11 x64
-- Minimum 32GB RAM (for 14B model inference)
-- NVIDIA GPU recommended (RTX series)
-- Internet for first-time model download (~18GB)
+- 32 GB RAM recommended (16 GB minimum — replies will be slow)
+- NVIDIA GPU with **10 GB+ free VRAM** strongly recommended
+  (RTX 3060 12 GB or better). The app falls back to CPU below
+  that threshold and logs a warning.
+- Internet for first-time model download (~18 GB) and the daily
+  Indian Kanoon sync
 
 ---
 
@@ -264,5 +268,7 @@ See [LICENSE](LICENSE) for details.
 - [Ollama](https://ollama.com) — local LLM runtime
 - [Indian Kanoon](https://indiankanoon.org) — legal database API
 - [ChromaDB](https://trychroma.com) — vector database
+- [sentence-transformers](https://sbert.net) — embedding models
 - [FastAPI](https://fastapi.tiangolo.com) — backend framework
 - [Electron](https://electronjs.org) — desktop framework
+- [Fluent UI React](https://react.fluentui.dev) — UI component library

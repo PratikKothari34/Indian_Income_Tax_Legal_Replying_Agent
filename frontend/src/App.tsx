@@ -29,7 +29,7 @@ import { RagStatusPanel } from "./components/RagStatusPanel";
 import { ReplyViewer } from "./components/ReplyViewer";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { UploadPanel } from "./components/UploadPanel";
-import { generateReply, getHealth } from "./lib/api";
+import { apiFetch, generateReply, getHealth } from "./lib/api";
 import { formatSessionTime, latestTurn, newSessionId, sessionToHistory } from "./lib/session";
 import type {
   GenerateResponse,
@@ -109,8 +109,11 @@ export function App() {
   const [healthLoading, setHealthLoading] = useState(true);
   const [healthDismissed, setHealthDismissed] = useState(false);
   const [temperature, setTemperature] = useState(() => {
-    const stored = parseFloat(localStorage.getItem(TEMP_KEY) ?? "0.7");
-    return Number.isNaN(stored) || stored === 0 ? 0.7 : stored;
+    // 0 is a legitimate (deterministic) setting — only fall back to the
+    // 0.7 default when nothing valid is stored.
+    const raw = localStorage.getItem(TEMP_KEY);
+    const stored = raw === null ? NaN : parseFloat(raw);
+    return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.7;
   });
   const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY) ?? newSessionId());
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -212,7 +215,7 @@ export function App() {
     let timer: number | null = null;
     async function probe(): Promise<void> {
       try {
-        const r = await fetch("http://127.0.0.1:8000/rag/status");
+        const r = await apiFetch("/rag/status");
         if (!r.ok) return;
         const status = (await r.json()) as { embedding_model_available?: boolean };
         if (!mounted) return;
@@ -317,14 +320,8 @@ export function App() {
   }
 
   async function handleDeleteSession(id: string) {
-    const api = (window as typeof window & {
-      localAgent?: Window["localAgent"] & {
-        deleteSession: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
-      };
-    }).localAgent;
-
     try {
-      const result = await api?.deleteSession(id);
+      const result = await window.localAgent?.deleteSession(id);
       if (result?.success) {
         setSessions((current) => current.filter((session) => session.session_id !== id));
         setConfirmDeleteSessionId(null);

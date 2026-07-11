@@ -39,7 +39,7 @@ log = get_rag_logger()
 # Single global lock so scheduled + manual triggers are mutually exclusive.
 _sync_lock: asyncio.Lock | None = None
 _scheduler: Any = None  # AsyncIOScheduler instance (typed loosely to avoid import at module load)
-_default_cron_expr = "0 2 * * *"  # daily at 02:00 local time
+_default_cron_expr = "0 12 * * *"  # daily at 12:00 (noon) local time
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +278,7 @@ def init_scheduler(app: Any) -> None:
     Adds a startup hook that:
 
     * Schedules the cron job (``rag_sync_schedule`` from ``config.json``,
-      defaulting to ``"0 2 * * *"``).
+      defaulting to ``"0 12 * * *"``).
     * Triggers an immediate sync if the store is empty or the last sync
       is older than 24 hours.
 

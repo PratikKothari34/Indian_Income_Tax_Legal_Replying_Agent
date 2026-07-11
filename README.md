@@ -232,6 +232,10 @@ This application has undergone a red-team security audit:
 - Session ID injection prevention
 - Magic-byte file type verification
 - Token masking in logs and API responses
+- Localhost CSRF / DNS-rebinding guard — mutating API requests from a
+  browser origin require a per-install auth token (`auth_token.txt`,
+  attached automatically by the Electron shell), and the Host header
+  is pinned to 127.0.0.1/localhost
 
 See git history for detailed security commit notes.
 

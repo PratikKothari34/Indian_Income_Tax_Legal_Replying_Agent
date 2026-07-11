@@ -4,8 +4,9 @@ In a packaged Windows install, all user data lives under
 ``%LOCALAPPDATA%\\ITaxReplyAgent`` (see :mod:`paths`). The server binds to
 ``127.0.0.1`` only and falls through 8000 → 8001 → 8002 → 8003 if the
 configured port is already in use, writing the actually-bound port to
-``BASE_DIR\\port.txt`` so the Electron frontend can pick it up. There are
-no outbound network calls except to the local Ollama daemon.
+``BASE_DIR\\port.txt`` so the Electron frontend can pick it up. The only
+outbound network calls are to the configured Ollama daemon and — during a
+RAG sync — the Indian Kanoon API / incometaxindia.gov.in scrapers.
 
 Run with::
 
@@ -17,6 +18,7 @@ Run with::
 from __future__ import annotations
 
 import logging
+import secrets
 import socket
 
 from fastapi import FastAPI
@@ -28,6 +30,7 @@ from paths import (
     configure_hf_cache,
     configure_logging,
     configure_tesseract,
+    ensure_auth_token,
     ensure_dirs,
     load_config,
     write_port,
@@ -73,10 +76,54 @@ allowed_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    # No cookies or HTTP auth are used anywhere — keep credentials off so
+    # the "null" origin (packaged Electron, but also any sandboxed iframe)
+    # can never be combined with ambient credentials.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Local-origin guard.
+#
+# Binding to 127.0.0.1 keeps remote hosts out, but any web page the user
+# visits can still fire cross-origin "simple" POSTs at localhost (classic
+# drive-by CSRF — no preflight for form/text bodies), and DNS rebinding can
+# put a hostile hostname in front of this port. Two gates close that:
+#
+#   1. The Host header must be 127.0.0.1 / localhost (kills DNS rebinding).
+#   2. A mutating request carrying a browser Origin must either come from
+#      one of our own dev origins, or present the per-install auth token
+#      (X-ITax-Auth). The packaged Electron renderer runs on the file://
+#      "null" origin and reads the token from AppData via IPC; a hostile
+#      page — including a sandboxed null-origin iframe — cannot read it.
+#
+# Requests with NO Origin header (curl, httpx, the smoke test) are untouched,
+# so the documented HTTP API is unchanged for local tooling.
+# ---------------------------------------------------------------------------
+_LOCAL_API_TOKEN = ensure_auth_token()
+_ALLOWED_HOSTNAMES = frozenset({"127.0.0.1", "localhost"})
+_TRUSTED_BROWSER_ORIGINS = frozenset(o for o in allowed_origins if o != "null")
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+@app.middleware("http")
+async def local_origin_guard(request, call_next):
+    """Reject DNS-rebinding hosts and unauthenticated cross-origin writes."""
+    host = (request.headers.get("host") or "").split(":", 1)[0].lower()
+    if host and host not in _ALLOWED_HOSTNAMES:
+        return JSONResponse(status_code=403, content={"detail": "Forbidden host."})
+    if request.method in _MUTATING_METHODS:
+        origin = request.headers.get("origin")
+        if origin is not None and origin not in _TRUSTED_BROWSER_ORIGINS:
+            supplied = request.headers.get("x-itax-auth") or ""
+            if not secrets.compare_digest(supplied, _LOCAL_API_TOKEN):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Missing or invalid local auth token."},
+                )
+    return await call_next(request)
 
 # Request-body cap for POST /generate. An OCR'd legal notice can be sizeable,
 # but 10 MiB is a generous ceiling; anything past it is rejected before the
@@ -137,7 +184,7 @@ def root():
     return {
         "name": "Indian Income Tax Legal Replying Agent",
         "status": "running",
-        "endpoints": ["/health", "/models", "/upload", "/generate"],
+        "endpoints": ["/health", "/models", "/upload", "/generate", "/rag"],
     }
 
 

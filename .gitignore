@@ -28,6 +28,8 @@ backend/rag/sync_status.json
 
 # Secrets
 backend/config.json
+backend/auth_token.txt
+backend/port.txt
 
 # Electron build cache
 frontend/dist/

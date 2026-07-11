@@ -4,25 +4,18 @@ import {
   Spinner,
   Text
 } from "@fluentui/react-components";
+import { apiFetch } from "../lib/api";
 
 /**
- * RAG status + manual-ingest panel — additive component.
- *
- * Phase 2 RAG, post-pivot to manual ingestion. Displays:
+ * RAG status + manual-ingest panel — rendered from the App.tsx sidebar
+ * ("RAG Library" view). Displays:
  *
  *   * The absolute path of the docs folder where the user should drop
  *     CBDT circulars / notifications / press releases / Acts as PDFs
  *     (or DOCX / TXT).
  *   * Sync timestamps + counts pulled from `GET /rag/status`.
  *   * A "Sync now" button that triggers `POST /rag/sync` (background).
- *
- * Like SettingsPanel, this component is shipped *additive*. It is not
- * wired into App.tsx by default — drop `<RagStatusPanel />` into the
- * sidebar (or a dedicated tab) when you want it visible. The component
- * has no dependencies on App.tsx state.
  */
-
-const API_BASE = "http://127.0.0.1:8000";
 
 type RagStatus = {
   last_sync: string | null;
@@ -53,8 +46,8 @@ type DocsFolder = {
   exists: boolean;
 };
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, init);
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await apiFetch(path, init);
   if (!r.ok) {
     let detail: string | undefined;
     try {
@@ -96,9 +89,9 @@ export function RagStatusPanel() {
     setError(null);
     try {
       const [s, f, d] = await Promise.all([
-        fetchJson<RagStatus>(`${API_BASE}/rag/status`),
-        fetchJson<DocsFolder>(`${API_BASE}/rag/docs-folder`),
-        fetchJson<RagDocument[]>(`${API_BASE}/rag/documents`)
+        fetchJson<RagStatus>("/rag/status"),
+        fetchJson<DocsFolder>("/rag/docs-folder"),
+        fetchJson<RagDocument[]>("/rag/documents")
       ]);
       setStatus(s);
       setFolder(f);
@@ -110,8 +103,8 @@ export function RagStatusPanel() {
 
   async function refreshStatusAndDocuments(): Promise<RagStatus> {
     const [s, d] = await Promise.all([
-      fetchJson<RagStatus>(`${API_BASE}/rag/status`),
-      fetchJson<RagDocument[]>(`${API_BASE}/rag/documents`)
+      fetchJson<RagStatus>("/rag/status"),
+      fetchJson<RagDocument[]>("/rag/documents")
     ]);
     setStatus(s);
     setDocuments(d);
@@ -138,7 +131,7 @@ export function RagStatusPanel() {
     setError(null);
     try {
       await fetchJson<{ status: string; message: string }>(
-        `${API_BASE}/rag/sync`,
+        "/rag/sync",
         { method: "POST" }
       );
 
@@ -169,7 +162,7 @@ export function RagStatusPanel() {
     setError(null);
     try {
       await fetchJson<{ status: string; message: string }>(
-        `${API_BASE}/rag/reindex`,
+        "/rag/reindex",
         { method: "POST" }
       );
       await refresh();

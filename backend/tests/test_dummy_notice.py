@@ -115,6 +115,8 @@ def main() -> int:
         ),
         "history": [],
         "temperature": 0.2,
+        # The DOCX write is opt-in; this test asserts the file exists.
+        "save_output": True,
     }
     result = _post_json(f"{BASE}/generate", payload)
     reply = result.get("reply", "")

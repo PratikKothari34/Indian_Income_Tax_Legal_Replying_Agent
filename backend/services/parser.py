@@ -153,15 +153,13 @@ def _indian_number_format(n: int | float) -> str:
     abs_n = abs(n)
 
     if isinstance(abs_n, float):
+        # Round FIRST so a fraction >= .995 carries into the whole part
+        # (999.999 must become "1,000", not "999" with the carry lost).
+        abs_n = round(abs_n, 2)
         whole = int(abs_n)
-        frac = abs_n - whole
+        frac = round(abs_n - whole, 2)
         # Two decimal places, dropped entirely when zero.
-        if frac:
-            decimal_str = f"{frac:.2f}"[1:]
-            if decimal_str == ".00":
-                decimal_str = ""
-        else:
-            decimal_str = ""
+        decimal_str = f"{frac:.2f}"[1:] if frac else ""
     else:
         whole = int(abs_n)
         decimal_str = ""

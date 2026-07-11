@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld("localAgent", {
   openLogsFolder: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("open-logs-folder"),
   getBackendPort: (): Promise<number> => ipcRenderer.invoke("get-backend-port"),
+  getBackendAuth: (): Promise<string> => ipcRenderer.invoke("get-backend-auth"),
   applyDesktopSettings: (settings: {
     run_at_startup: boolean;
     system_tray: boolean;

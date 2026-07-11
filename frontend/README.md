@@ -31,7 +31,9 @@ cd ..\frontend
 .\start.bat
 ```
 
-The frontend talks only to `http://127.0.0.1:8000`.
+The frontend talks only to the local backend on `127.0.0.1` — the port is
+resolved at runtime via the Electron IPC bridge (default `8000`, falling
+back through `8001–8003` when taken).
 
 ## Checks
 

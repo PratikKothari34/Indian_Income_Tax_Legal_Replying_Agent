@@ -4,6 +4,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawn, ChildProcess } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,11 @@ function backendExePath(): string {
     ? path.join(process.resourcesPath, "backend.exe")
     : path.join(__dirname, "../../dist-backend/backend.exe");
 }
+function backendAuthTokenPath(): string {
+  return app.isPackaged
+    ? path.join(APPDATA_BASE_DIR, "auth_token.txt")
+    : path.join(__dirname, "../../backend/auth_token.txt");
+}
 function appIconPath(): string {
   return app.isPackaged
     ? path.join(app.getAppPath(), "assets", "icon.png")
@@ -129,7 +135,7 @@ const DEFAULT_CONFIG: AppConfig = {
   // The incometax /news/*.pdf probe is opt-in because Akamai may 403
   // it depending on the deploy IP. Toggle from the Settings panel.
   incometax_pdf_scraper_enabled: false,
-  rag_sync_schedule: "0 2 * * *",
+  rag_sync_schedule: "0 12 * * *",
   run_at_startup: false,
   system_tray: true,
   keep_awake: true
@@ -211,7 +217,7 @@ function pingHealth(port: number, timeoutMs = 2000): Promise<boolean> {
   });
 }
 
-async function spawnBackend(initialPort: number): Promise<void> {
+async function spawnBackend(): Promise<void> {
   const exe = backendExePath();
   if (!existsSync(exe)) {
     throw new Error(`backend.exe not found at ${exe}`);
@@ -229,7 +235,6 @@ async function spawnBackend(initialPort: number): Promise<void> {
     cwd: path.dirname(exe),
     env: {
       ...process.env,
-      ITAX_BACKEND_PORT: String(initialPort),
       HF_HOME: hfHome,
       TRANSFORMERS_CACHE: hfHome,
       SENTENCE_TRANSFORMERS_HOME: hfHome,
@@ -277,7 +282,7 @@ async function ensureBackendRunning(cfg: AppConfig): Promise<number> {
   if (app.isPackaged) {
     // Production: we own the backend lifecycle. Spawn the bundled
     // backend.exe and poll until it answers /health.
-    await spawnBackend(resolvedBackendPort);
+    await spawnBackend();
     const ready = await waitForBackend(30_000);
     if (ready === null) {
       latestBackendOnline = false;
@@ -366,11 +371,16 @@ function installApplicationMenu(): void {
 }
 
 function isAllowedNavigation(url: string): boolean {
-  return (
-    url.startsWith("file://") ||
-    url.startsWith("http://127.0.0.1:5173/") ||
-    url === "http://127.0.0.1:5173/"
-  );
+  if (url.startsWith("http://127.0.0.1:5173/") || url === "http://127.0.0.1:5173/") {
+    return true; // dev server
+  }
+  if (url.startsWith("file://")) {
+    // Only our own bundled index.html — not arbitrary local files.
+    const appIndex = pathToFileURL(path.resolve(app.getAppPath(), "dist", "index.html")).href;
+    const bare = url.split("#")[0].split("?")[0];
+    return bare === appIndex;
+  }
+  return false;
 }
 
 function showMainWindow(): void {
@@ -551,24 +561,33 @@ ipcMain.handle("list-sessions", async () => {
       entries
         .filter((entry) => entry.isFile() && /^session_.+\.json$/i.test(entry.name))
         .map(async (entry) => {
-          const fullPath = path.join(dir, entry.name);
-          const raw = await fs.readFile(fullPath, "utf-8");
-          const parsed = JSON.parse(raw) as {
-            session_id?: string;
-            created_at?: string;
-            updated_at?: string;
-            turns?: unknown[];
-          };
-          const sessionId = parsed.session_id ?? entry.name.replace(/^session_|\.json$/gi, "");
-          return {
-            session_id: sessionId,
-            created_at: parsed.created_at ?? "",
-            updated_at: parsed.updated_at ?? parsed.created_at ?? "",
-            turn_count: Array.isArray(parsed.turns) ? parsed.turns.length : 0
-          };
+          // Per-file guard: one unreadable / corrupt session file must not
+          // blank the entire sidebar — skip it and keep the rest.
+          try {
+            const fullPath = path.join(dir, entry.name);
+            const raw = await fs.readFile(fullPath, "utf-8");
+            const parsed = JSON.parse(raw) as {
+              session_id?: string;
+              created_at?: string;
+              updated_at?: string;
+              turns?: unknown[];
+            };
+            const sessionId = parsed.session_id ?? entry.name.replace(/^session_|\.json$/gi, "");
+            return {
+              session_id: sessionId,
+              created_at: parsed.created_at ?? "",
+              updated_at: parsed.updated_at ?? parsed.created_at ?? "",
+              turn_count: Array.isArray(parsed.turns) ? parsed.turns.length : 0
+            };
+          } catch {
+            void frontendLog(`list-sessions: skipping unreadable file ${entry.name}`);
+            return null;
+          }
         })
     );
-    return sessions.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return sessions
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   } catch {
     return [];
   }
@@ -659,6 +678,19 @@ ipcMain.handle("open-logs-folder", async () => {
 });
 
 ipcMain.handle("get-backend-port", () => resolvedBackendPort);
+
+// Per-install auth token minted by the backend on first boot. The renderer
+// attaches it as X-ITax-Auth on mutating requests; the backend rejects
+// browser-origin POSTs (including the packaged app's "null" origin) that
+// lack it. Read lazily on each call — the file only exists once the
+// backend has booted, and it never changes within a session.
+ipcMain.handle("get-backend-auth", async () => {
+  try {
+    return (await fs.readFile(backendAuthTokenPath(), "utf-8")).trim();
+  } catch {
+    return "";
+  }
+});
 
 ipcMain.handle("apply-desktop-settings", (_event, settings: DesktopSettings) => {
   applyDesktopSettings({

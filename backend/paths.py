@@ -16,6 +16,7 @@ import json
 import logging
 import logging.handlers
 import os
+import secrets
 import sys
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,7 @@ UPLOADS_DIR: Path = BASE_DIR / "uploads"
 LOGS_DIR: Path = BASE_DIR / "logs"
 CONFIG_PATH: Path = BASE_DIR / "config.json"
 PORT_FILE: Path = BASE_DIR / "port.txt"
+AUTH_TOKEN_PATH: Path = BASE_DIR / "auth_token.txt"
 
 # Phase 2 — RAG layout. All vector-store + downloaded-PDF state lives under
 # BASE_DIR/rag so the entire app remains a single uninstall target.
@@ -73,7 +75,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "backend_port": 8000,
     "model_storage_path": os.path.join(os.path.expanduser("~"), ".ollama", "models"),
     # Cron schedule for the RAG sync job (APScheduler crontab format).
-    # Default: daily at 02:00 local time.
+    # Default: daily at 12:00 (noon) local time — matches the README, the
+    # installer, the Electron shell's default, and the scheduler fallback.
     "rag_sync_schedule": "0 12 * * *",
     # Indian Kanoon API token. Used by services/rag_scraper.py to auto-fetch
     # CBDT circulars, notifications, Finance Acts, and the Income Tax Act /
@@ -185,6 +188,30 @@ def write_port(port: int) -> None:
     """Write the actually-bound backend port to ``port.txt`` for the frontend."""
     ensure_dirs()
     PORT_FILE.write_text(str(port), encoding="utf-8")
+
+
+def ensure_auth_token() -> str:
+    """Return the per-install local API auth token, minting it on first use.
+
+    The token gates browser-originated mutating requests (see the
+    ``local_origin_guard`` middleware in ``main.py``): a hostile web page
+    can fire cross-origin POSTs at ``127.0.0.1`` but cannot read this
+    file, while the Electron shell reads it and attaches it as the
+    ``X-ITax-Auth`` header. Reuse-if-exists (rather than rotate-per-boot)
+    because uvicorn re-imports this module in a fresh module object when
+    started via ``main:app`` — regenerating on each import would leave
+    the middleware and the file out of sync.
+    """
+    ensure_dirs()
+    try:
+        existing = AUTH_TOKEN_PATH.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+    token = secrets.token_hex(32)
+    AUTH_TOKEN_PATH.write_text(token, encoding="utf-8")
+    return token
 
 
 def configure_tesseract() -> None:

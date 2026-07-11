@@ -55,8 +55,7 @@ IK_PUBLIC_URL_FMT = "https://indiankanoon.org/doc/{docid}/"
 
 #: Year-tagged queries are built at sync time from
 #: :func:`_build_ik_queries` so they shift forward automatically — in
-#: 2027 we'll auto-fetch ``"CBDT circular 2027"`` / ``"CBDT circular 2026"``
-#: with no source edit. Two pages per query.
+#: 2027 the Finance Act queries roll to 2027/2026 with no source edit.
 
 #: Pages of search results to pull for each query (0-indexed). 5 pages
 #: at 10 rows/page gives 50 candidate rows per query before dedup.
@@ -703,7 +702,6 @@ def scrape_indian_kanoon() -> dict[str, Any]:
 
     # ----- Phase B1: collect doc IDs across all queries -------------------
     seen_results: dict[str, dict[str, Any]] = {}
-    query_failures: list[str] = []
 
     for q_spec in queries:
         query = q_spec["q"]
@@ -725,10 +723,6 @@ def scrape_indian_kanoon() -> dict[str, Any]:
                 "[ik] q=%r doctypes=%s page=%d -> %d rows",
                 query, doctypes or "-", page, len(rows),
             )
-        if not any(
-            seen_results for _ in (None,)
-        ):  # cheap "any results so far" guard
-            pass
 
     if not seen_results:
         log.warning("[ik] no search results across any query — API/token may be unhealthy")
@@ -852,7 +846,7 @@ def scrape_indian_kanoon() -> dict[str, Any]:
 
     return {
         "downloaded": downloaded,
-        "errors": errors + query_failures,
+        "errors": errors,
         "sources_ok": [IK_API_BASE] if downloaded or not errors else [],
         "sources_bad": [IK_API_BASE] if errors and not downloaded else [],
     }
@@ -1055,8 +1049,6 @@ def scrape_incometax_pdfs() -> dict[str, Any]:
         "sources_ok": [INCOMETAX_BASE] if downloaded else [],
         "sources_bad": [INCOMETAX_BASE] if errors and not downloaded else [],
     }
-
-
 
 
 # ---------------------------------------------------------------------------

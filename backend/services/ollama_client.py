@@ -12,8 +12,10 @@ Responsibilities:
 * Expose a :func:`health` probe so the ``/health`` route can report Ollama
   reachability + per-model availability without calling chat.
 
-All calls go to the local Ollama daemon at ``127.0.0.1:11434``. There are
-no outbound HTTP calls in this module.
+All calls go to the Ollama daemon at the host/port configured in
+``config.json`` (``ollama_host`` / ``ollama_port``, default
+``127.0.0.1:11434``). There are no other outbound HTTP calls in this
+module.
 """
 
 from __future__ import annotations
@@ -24,6 +26,32 @@ import subprocess
 import ollama
 
 log = logging.getLogger("itax.ollama")
+
+# Client is cached per (host, port) so a config change (the Electron shell
+# restarts the backend on save, but the dev backend is long-lived) picks up
+# the new daemon address on the next call without recreating the client on
+# every request.
+_client: ollama.Client | None = None
+_client_key: tuple[str, int] | None = None
+
+
+def _get_client() -> ollama.Client:
+    """Return an ``ollama.Client`` bound to the configured host/port."""
+    global _client, _client_key
+    from paths import load_config
+
+    cfg = load_config()
+    host = str(cfg.get("ollama_host") or "127.0.0.1").strip() or "127.0.0.1"
+    try:
+        port = int(cfg.get("ollama_port") or 11434)
+    except (TypeError, ValueError):
+        port = 11434
+    key = (host, port)
+    if _client is None or _client_key != key:
+        base = host if "://" in host else f"http://{host}:{port}"
+        _client = ollama.Client(host=base)
+        _client_key = key
+    return _client
 
 #: Spec'd primary model — first choice for standard chat calls.
 PRIMARY_MODEL = "qwen2.5:14b"
@@ -157,7 +185,7 @@ def list_local_models() -> list[dict]:
     Raises :class:`OllamaUnavailable` if the daemon cannot be reached.
     """
     try:
-        resp = ollama.list()
+        resp = _get_client().list()
     except Exception as e:  # connection refused, etc.
         raise OllamaUnavailable(str(e)) from e
 
@@ -293,7 +321,7 @@ def chat(
             last_err = RuntimeError(f"Model '{candidate}' not pulled locally")
             continue
         try:
-            resp = ollama.chat(
+            resp = _get_client().chat(
                 model=candidate,
                 messages=messages,
                 options={"temperature": temperature},

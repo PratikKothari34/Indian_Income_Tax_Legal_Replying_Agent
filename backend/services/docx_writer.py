@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from pathlib import Path
 
 from docx import Document
 from docx.shared import Pt

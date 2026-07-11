@@ -11,11 +11,7 @@ import {
 import { Eye20Regular, EyeOff20Regular } from "@fluentui/react-icons";
 
 /**
- * Settings panel — additive component. Not wired into App.tsx by default
- * to keep the existing UI logic untouched. To enable, import and render
- * this component from the sidebar in App.tsx:
- *
- *     <SettingsPanel />
+ * Settings panel — rendered from the App.tsx sidebar ("Settings" view).
  *
  * Reads + writes config.json via window.localAgent IPC. On save the
  * Electron main process restarts the backend subprocess so the new port

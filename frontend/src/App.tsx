@@ -110,10 +110,11 @@ export function App() {
   const [healthDismissed, setHealthDismissed] = useState(false);
   const [temperature, setTemperature] = useState(() => {
     // 0 is a legitimate (deterministic) setting — only fall back to the
-    // 0.7 default when nothing valid is stored.
+    // 0.2 default when nothing valid is stored. 0.2 matches the backend
+    // default: citation accuracy outranks phrasing variety for drafting.
     const raw = localStorage.getItem(TEMP_KEY);
     const stored = raw === null ? NaN : parseFloat(raw);
-    return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.7;
+    return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.2;
   });
   const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY) ?? newSessionId());
   const [sessions, setSessions] = useState<SessionSummary[]>([]);

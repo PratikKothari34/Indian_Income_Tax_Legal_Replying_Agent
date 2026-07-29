@@ -60,9 +60,12 @@
 ### Deploy machine (end user)
 - Windows 10/11 x64
 - 32 GB RAM recommended (16 GB minimum — replies will be slow)
-- NVIDIA GPU with **10 GB+ free VRAM** strongly recommended
-  (RTX 3060 12 GB or better). The app falls back to CPU below
-  that threshold and logs a warning.
+- A GPU is **not** required. The 14B models run if **either**
+  **10 GB+ free VRAM** (NVIDIA, RTX 3060 12 GB or better) **or**
+  **20 GB+ free system RAM** is available — 32 GB and no GPU is a
+  supported configuration and runs on CPU. Below both thresholds the
+  app still works but routes every notice to `qwen2.5:14b` and logs a
+  warning. See [Model Selection](#model-selection).
 - Internet for first-time model download (~18 GB) and the daily
   Indian Kanoon sync
 
@@ -125,7 +128,10 @@ At ₹0.20/document this covers ~50,000 document fetches/month.
 ### Temperature
 
 The Temperature slider controls how varied the LLM's wording is on each
-generation. Range is 0.0–1.0; the app defaults to 0.7.
+generation. Range is 0.0–1.0; the app defaults to 0.2, matching the
+backend default. Low values favour citation accuracy over phrasing
+variety, which is what legal drafting needs. Your last-used value is
+remembered per machine.
 
 - **0.0–0.3** — deterministic and conservative. The same notice produces
   near-identical replies on repeated generations. Recommended when
@@ -135,11 +141,31 @@ generation. Range is 0.0–1.0; the app defaults to 0.7.
 - **0.7–1.0** — more varied. Useful when regenerating to explore an
   alternative draft, but raises the risk of looser citation discipline.
 
-> Model selection is automatic — the backend chooses between
-> `qwen2.5:14b` (default) and `deepseek-r1:14b` (complex notices —
-> reassessment, search-and-seizure, penalty, transfer pricing, etc.)
-> based on available VRAM/RAM and notice complexity. No manual model
-> selection is needed.
+### Model Selection
+
+Model selection is automatic — no manual choice is needed. Two inputs
+decide it: notice complexity, and the hardware available at that moment.
+
+| Notice | Hardware above threshold | Model tried first |
+|---|---|---|
+| Complex (reassessment, search & seizure, penalty, transfer pricing, s.263, DTAA, or text over 3,000 characters) | yes | `deepseek-r1:14b` |
+| Standard | yes | `qwen2.5:14b` |
+| Either | no | `qwen2.5:14b` (logged as a warning) |
+
+If the first model cannot serve the request, the other one is tried —
+so both remain reachable in every case.
+
+**Hardware threshold.** The machine qualifies if **either** condition
+holds:
+
+- 10 GB or more *free* VRAM on an NVIDIA GPU, **or**
+- 20 GB or more free system RAM.
+
+Either alone is enough — a 32 GB machine with no NVIDIA GPU qualifies on
+the RAM path and runs on CPU. Note the GPU check reads *free* VRAM, not
+total, so a 12 GB card already loaded by another process can fall below
+the line and quietly route a complex notice to `qwen2.5:14b`. The chosen
+model is recorded in the reply metadata and the backend log.
 
 ### Supported Notice Types
 - Section 143(1) — Intimation
@@ -187,13 +213,24 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8000
+python main.py
 
 # Frontend (new terminal)
 cd frontend
 npm install
 .\start.bat
 ```
+
+**Backend port.** `python main.py` binds 127.0.0.1 and tries
+`8000 → 8001 → 8002 → 8003`, taking the first free port, then writes the
+bound port to `port.txt` (next to the backend in dev; under
+`%LOCALAPPDATA%\ITaxReplyAgent` when installed). The Electron frontend
+reads that file, so `port.txt` — not `8000` — is the source of truth
+when the frontend cannot reach the backend. Check it first.
+
+Running `uvicorn main:app --host 127.0.0.1 --port 8000` directly also
+works, but pins the port and skips the `port.txt` write, so the frontend
+will not discover a non-default port.
 
 ---
 

@@ -15,37 +15,46 @@ The backend is consumed by an Electron frontend on the same machine.
 3. [Setup](#setup)
 4. [Running](#running)
 5. [API reference](#api-reference)
-6. [Legal-drafting prompt design](#legal-drafting-prompt-design)
-7. [Local-only guarantees](#local-only-guarantees)
-8. [Testing](#testing)
-9. [Troubleshooting](#troubleshooting)
-10. [Deployment notes](#deployment-notes)
+6. [RAG subsystem](#rag-subsystem)
+7. [Request authentication](#request-authentication)
+8. [Legal-drafting prompt design](#legal-drafting-prompt-design)
+9. [Local-only guarantees](#local-only-guarantees)
+10. [Testing](#testing)
+11. [Troubleshooting](#troubleshooting)
+12. [Deployment notes](#deployment-notes)
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────┐  HTTP (127.0.0.1:8000)   ┌──────────────────────┐
-│ Electron frontend│ ───────────────────────► │ FastAPI (uvicorn)    │
-└──────────────────┘                          │  ─ /health           │
-                                              │  ─ /models           │
-                                              │  ─ /upload           │
-                                              │  ─ /generate         │
-                                              └──────────┬───────────┘
-                                                         │
-                            ┌────────────────────────────┼─────────────────────────────┐
-                            ▼                            ▼                             ▼
-                ┌────────────────────┐  ┌────────────────────────────┐  ┌──────────────────────┐
-                │ services/parser    │  │ services/ollama_client     │  │ services/docx_writer │
-                │ (PDF/DOCX/XLS/OCR) │  │ (qwen2.5 → deepseek-r1)    │  │ (Markdown → DOCX)    │
-                └────────────────────┘  └─────────────┬──────────────┘  └──────────────────────┘
-                                                      │
-                                                      ▼ HTTP (127.0.0.1:11434)
-                                              ┌────────────────┐
-                                              │ Ollama daemon  │
-                                              └────────────────┘
+┌──────────────────┐  HTTP (127.0.0.1, see note)  ┌──────────────────────┐
+│ Electron frontend│ ───────────────────────────► │ FastAPI (uvicorn)    │
+└──────────────────┘                              │  ─ /health           │
+                                                  │  ─ /models           │
+                                                  │  ─ /upload           │
+                                                  │  ─ /generate         │
+                                                  │  ─ /rag/*            │
+                                                  └──────────┬───────────┘
+                                                             │
+             ┌───────────────────────┬───────────────────────┼───────────────────────┐
+             ▼                       ▼                       ▼                       ▼
+ ┌────────────────────┐ ┌────────────────────────┐ ┌──────────────────────┐ ┌──────────────────┐
+ │ services/parser    │ │ services/ollama_client │ │ services/docx_writer │ │ services/rag_*   │
+ │ (PDF/DOCX/XLS/OCR) │ │ (qwen2.5 → deepseek-r1)│ │ (Markdown → DOCX)    │ │ (ChromaDB + IK)  │
+ └────────────────────┘ └───────────┬────────────┘ └──────────────────────┘ └──────────────────┘
+                                    │
+                                    ▼ HTTP (127.0.0.1:11434)
+                            ┌────────────────┐
+                            │ Ollama daemon  │
+                            └────────────────┘
 ```
+
+**Port.** The backend tries `8000 → 8001 → 8002 → 8003` and binds the first
+free one, then writes the winner to `port.txt` (next to the backend in dev,
+under `%LOCALAPPDATA%\ITaxReplyAgent` when installed). Read `port.txt` rather
+than assuming `8000` — that assumption is the usual cause of a "backend is
+down" report when the backend is actually up on `8001`.
 
 Request flow for a single legal-reply turn:
 
@@ -63,25 +72,31 @@ Request flow for a single legal-reply turn:
 
 ```
 backend/
-├── main.py                      # FastAPI entrypoint, CORS, route wiring
+├── main.py                      # FastAPI entrypoint, CORS, auth guard, route wiring
+├── paths.py                     # dev vs installed path resolution, PORT_FILE
 ├── requirements.txt             # pinned dependencies
 ├── start.ps1                    # PowerShell launcher (venv + install + uvicorn)
 ├── routes/
 │   ├── health.py                # GET  /health
 │   ├── models.py                # GET  /models
 │   ├── upload.py                # POST /upload
-│   └── generate.py              # POST /generate
+│   ├── generate.py              # POST /generate
+│   └── rag.py                   # /rag/* — status, sync, documents, reindex
 ├── services/
 │   ├── parser.py                # PDF/DOCX/XLS/XLSX/JPEG → plain text
 │   ├── ollama_client.py         # chat() with primary/fallback model chain
 │   ├── prompts.py               # system prompt + chat-message builder
 │   ├── docx_writer.py           # Markdown-aware .docx renderer
-│   └── session_store.py         # JSON-on-disk per-session history
+│   ├── session_store.py         # JSON-on-disk per-session history (atomic writes)
+│   ├── rag_scraper.py           # Indian Kanoon API fetcher
+│   ├── rag_embedder.py          # ChromaDB + sentence-transformers index
+│   └── rag_scheduler.py         # APScheduler cron for the daily sync
 ├── tests/
 │   └── test_dummy_notice.py     # E2E test against a running backend
 ├── data/                        # session JSONs (created at runtime)
 ├── output/                      # generated DOCX replies (created at runtime)
-└── uploads/                     # raw uploaded notices (created at runtime)
+├── uploads/                     # raw uploaded notices (created at runtime)
+└── rag/                         # chromadb/, docs/, models/ (created at runtime)
 ```
 
 ---
@@ -151,14 +166,15 @@ In another:
 
 ```powershell
 cd backend
-.\start.ps1                                     # listens on 127.0.0.1:8000
+.\start.ps1                                     # binds 127.0.0.1, first free port 8000-8003
 ```
 
-Sanity-check from a third window:
+Sanity-check from a third window (read the bound port first):
 
 ```powershell
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/models
+$port = Get-Content .\port.txt
+curl "http://127.0.0.1:$port/health"
+curl "http://127.0.0.1:$port/models"
 ```
 
 ---
@@ -166,7 +182,11 @@ curl http://127.0.0.1:8000/models
 ## API reference
 
 All endpoints are JSON in / JSON out except `/upload` (multipart form-data
-in, JSON out). The base URL is `http://127.0.0.1:8000`.
+in, JSON out). The base URL is `http://127.0.0.1:<port>`, where `<port>` is
+whatever the backend recorded in `port.txt` — see [Architecture](#architecture).
+
+Mutating requests from a browser origin also need an auth header; see
+[Request authentication](#request-authentication).
 
 ### `GET /health`
 
@@ -217,7 +237,8 @@ Returns HTTP `503` if Ollama is unreachable.
 
 Accept a notice file, persist it under `uploads/`, return extracted text.
 
-**Request** — `multipart/form-data` with one field, `file`.
+**Request** — `multipart/form-data` with one field, `file`. One file per
+request; the frontend issues several calls for a multi-file case.
 
 | Extension       | Parser                          |
 |-----------------|---------------------------------|
@@ -226,6 +247,15 @@ Accept a notice file, persist it under `uploads/`, return extracted text.
 | `.xlsx`         | `openpyxl` (read-only)          |
 | `.xls`          | `xlrd 2.0.1`                    |
 | `.jpg`/`.jpeg`/`.png` | `pytesseract` + Pillow OCR |
+
+Limits and checks:
+
+* **25 MiB** maximum (`MAX_UPLOAD_BYTES`); larger bodies get `413`.
+* The extension must be in `SUPPORTED_EXTS` **and** the file's magic bytes
+  must match it — renaming `payload.exe` to `notice.pdf` is rejected `415`.
+* Filenames are sanitised, and a same-named upload does not overwrite an
+  earlier one: it becomes `notice (2).pdf`. This matters because `notice.pdf`
+  recurs across unrelated cases.
 
 **Response**
 
@@ -309,6 +339,76 @@ The first that is locally pulled AND returns non-empty content wins.
 
 ---
 
+## RAG subsystem
+
+Legal source documents are fetched from Indian Kanoon, embedded with
+`sentence-transformers` (`all-MiniLM-L6-v2`), and stored in ChromaDB under
+`backend/rag/`. A daily APScheduler cron keeps the corpus current.
+
+All routes are under the `/rag` prefix.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/rag/status` | GET | Sync status, next scheduled run, `chunks_total`, `superseded_docs`, `embedding_model_available` |
+| `/rag/sync` | POST | Trigger a sync in the background; returns immediately |
+| `/rag/documents` | GET | Every indexed document with chunk count and metadata |
+| `/rag/reindex` | POST | Wipe the collection and re-embed every local PDF |
+| `/rag/docs-folder` | GET | Absolute path to the manual-ingest drop folder |
+
+**Sync schedule.** Configurable as a cron expression in `config.json`
+(`rag_sync_schedule`); the default is noon daily. The expression is validated
+before use — an invalid one is rejected rather than applied, because
+`init_scheduler` runs at import time and a `CronTrigger` exception there
+would otherwise prevent the backend from starting at all.
+
+**`/rag/sync` and `/rag/reindex` are fire-and-forget.** Both return
+`{"status": "started"}` immediately and do the work in the background. Poll
+`/rag/status` to watch `chunks_total` rise. A lock inside `run_sync()`
+prevents overlapping runs, so repeated clicks are harmless.
+
+**`/rag/reindex` is destructive** — it clears the vector store, drops the
+scrape dedup cache, then re-embeds from disk and re-fetches the Indian Kanoon
+corpus from scratch. Use it after changing the metadata schema or to recover
+from a corrupted store, not routinely.
+
+**Manual ingest.** PDFs dropped into the folder reported by
+`/rag/docs-folder` are picked up by `/rag/reindex` alongside the scraped
+corpus — useful for documents Indian Kanoon does not carry.
+
+**First run needs internet** to download the ~90 MB embedding model. Until
+that succeeds, `/rag/status` reports `embedding_model_available: false` and
+retrieval is unavailable; drafting still works without it.
+
+---
+
+## Request authentication
+
+The backend binds `127.0.0.1`, but a localhost bind alone does not stop a
+malicious web page in the user's browser from issuing requests. Two guards
+close that gap, both in `main.py`:
+
+* **Host pinning** — the `Host` header must be `127.0.0.1` or `localhost`.
+  This defeats DNS rebinding, where an attacker-controlled name resolves to
+  a loopback address.
+* **Per-install token** — a mutating request carrying a browser `Origin`
+  that is not one of the known dev origins must present the install's token
+  in an `X-ITax-Auth` header. The token lives in `auth_token.txt` and is
+  attached automatically by the Electron shell.
+
+Consequences when calling the API by hand:
+
+* `curl` and other non-browser clients send no `Origin`, so `GET` probes such
+  as `/health` work with no header.
+* A request with a foreign `Origin` and no valid token gets `403`.
+* **`TestClient` sends `Host: testserver`**, which the host guard rejects.
+  Pass `base_url="http://127.0.0.1"` *and* an explicit `Host` header, or every
+  test will see a spurious `403`.
+
+The packaged app loads from `file://`, which sends `Origin: null` — allowed
+by design, since a `file://` page is not a remote attacker.
+
+---
+
 ## Legal-drafting prompt design
 
 The system prompt is in `services/prompts.py` and is layered into four blocks:
@@ -352,12 +452,16 @@ anchors list — that is the cheap, reliable way to expand coverage.
 
 * `main.py` binds uvicorn to `127.0.0.1` only — never `0.0.0.0`.
 * `services/ollama_client.py` calls only the local Ollama daemon at
-  `127.0.0.1:11434`.
-* No outbound HTTP client is configured anywhere in the codebase. The only
-  network library imported (`httpx`, transitively via `ollama`) is used
-  only against the local daemon.
-* All artefacts stay on disk under `backend/data/` and `backend/output/`.
-  Nothing is uploaded to any cloud service.
+  `127.0.0.1:11434`. **Inference is entirely local** — no notice text, no
+  uploaded file, and no generated reply ever leaves the machine.
+* All artefacts stay on disk under `backend/data/`, `backend/output/`, and
+  `backend/uploads/`. Nothing is uploaded to any cloud service.
+
+**One deliberate exception.** The RAG subsystem makes *outbound* calls to the
+Indian Kanoon API (`services/rag_scraper.py`) and downloads the embedding
+model on first use. These fetch public legal texts — they never transmit user
+data. Disable the sync entirely if you need a strictly air-gapped install;
+drafting continues to work without RAG, with retrieval unavailable.
 * CORS is restricted to `localhost`, `127.0.0.1`, and the `null` origin
   (which is what `file://` Electron sends for packaged apps).
 
@@ -396,7 +500,9 @@ prefers omission over invention.
 
 | Symptom                                                       | Likely cause / fix                                                                                                                              |
 |---------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `WinError 10061 ... target machine actively refused it`       | Backend isn't running (or crashed). Run `.\start.ps1`. If the test uses `localhost` and uvicorn is bound to IPv4, switch to `127.0.0.1`.        |
+| `WinError 10061 ... target machine actively refused it`       | Backend isn't running, **or you used the wrong port**. Check `port.txt` — the backend may be on 8001-8003. If that's right, run `.\start.ps1`.  |
+| `403 Forbidden` on a request that used to work                | Host guard or auth token. Non-browser clients need no header; `TestClient` needs `base_url` + an explicit `Host`. See [Request authentication](#request-authentication). |
+| Backend exits immediately at startup, no traceback in the UI  | Invalid `rag_sync_schedule` cron in `config.json`. It is validated now, but a hand-edited malformed value is still worth checking first.        |
 | `/health` returns `degraded` with `ollama_running: false`     | Ollama daemon isn't running. Start it with `ollama serve`.                                                                                      |
 | `/health` returns `degraded` but `ollama_running: true`       | Neither primary nor fallback model is pulled. Run `ollama pull qwen2.5:14b` and `ollama pull deepseek-r1:14b`.                                  |
 | First `/generate` call takes 1–3 minutes                      | Cold model load. With <16 GB combined VRAM+RAM, the model also spills to disk. Subsequent calls are fast while the model is hot.                 |
@@ -409,22 +515,29 @@ prefers omission over invention.
 
 ## Deployment notes
 
-For the eventual 32 GB RAM target machine:
+The backend ships inside the installer — PyInstaller freezes it to a single
+`backend.exe`, which the Electron main process launches as a child. It is
+not run as loose Python on an end-user machine.
 
-* No code changes needed — `qwen2.5:14b` will load fully in RAM and the
-  fallback path effectively becomes unused (still kept as insurance).
-* Move the working directory anywhere; all paths in the codebase are derived
-  from `__file__` and stay relative to the `backend/` folder.
-* If you bundle the backend into the Electron installer, ship `backend/` and
-  invoke `python main.py` as a child process from the Electron main process.
-  Don't forget to also bundle (or check for) Ollama and the pulled models —
-  those live under `%USERPROFILE%\.ollama\models` by default.
-* The packaged Electron app loads pages from `file://`, which means the
-  browser sends `Origin: null`. The CORS list in `main.py` already allows
-  `"null"` for this reason.
+* **Paths differ between dev and installed.** `paths.py` is the single place
+  that resolves this: in dev, data sits under `backend/`; when installed, it
+  moves to `%LOCALAPPDATA%\ITaxReplyAgent`. Derive paths from `paths.py`
+  rather than from `__file__` in new code.
+* **First launch is slow.** The frozen executable unpacks to a temp directory
+  before binding its port — 30–60 seconds. A health poll that gives up sooner
+  will look like a failed start when the backend is merely still unpacking.
+* **Ollama is a separate install.** It is not bundled. Models live under
+  `%USERPROFILE%\.ollama\models` and are pulled on first run (~18 GB).
+* **Hardware.** On the 32 GB target, `qwen2.5:14b` loads fully into RAM and
+  the fallback stays unused insurance. Below the threshold the app still
+  works but routes every notice to `qwen2.5:14b` and logs a warning.
+* **`Origin: null`.** The packaged app loads from `file://`, so the renderer
+  sends a null origin. Both the CORS list and the auth guard in `main.py`
+  allow it deliberately — see [Request authentication](#request-authentication).
 
 ---
 
 ## License
 
-Internal / private — not for redistribution.
+GNU General Public License v3.0 — see [LICENSE](../LICENSE) at the
+repository root.

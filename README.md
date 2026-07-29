@@ -8,15 +8,18 @@
 ![Status: Active](https://img.shields.io/badge/Status-Active-brightgreen)
 [![Download](https://img.shields.io/github/v/release/PratikKothari34/Indian_Income_Tax_Legal_Replying_Agent?label=Download&color=success)](https://github.com/PratikKothari34/Indian_Income_Tax_Legal_Replying_Agent/releases/latest)
 
-> A fully local Windows desktop application for Indian income tax
-> professionals to draft formal replies to ITD notices using
-> local LLMs, RAG, and automatic legal document sync.
+> A Windows desktop application for Indian income tax professionals to
+> draft formal replies to ITD notices. Inference runs entirely on your
+> own machine using local LLMs and RAG, with automatic legal document
+> sync.
 
 ---
 
 ## Features
 
-- **Fully local** — no data leaves your machine, no cloud API
+- **Local inference** — notices, uploads and drafted replies never leave
+  your machine; no cloud LLM API. The only outbound traffic is the legal
+  document sync (see [Privacy](#privacy))
 - **LLM-powered replies** — qwen2.5:14b for standard notices,
   deepseek-r1:14b auto-selected for complex cases (reassessment,
   search & seizure, penalty, transfer pricing, DTAA, etc.)
@@ -97,7 +100,8 @@ run. That is expected — see [Installation](#installation) step 2.
      [api.indiankanoon.org](https://api.indiankanoon.org))
 5. Wait for model downloads (~18GB, needs internet)
 6. First launch downloads the embedding model (~90MB)
-7. After that — **fully offline**
+7. After that, **drafting works entirely offline** — only the daily legal
+   sync needs internet, and it can be disabled (see [Privacy](#privacy))
 
 First launch takes 30–60 seconds: the bundled backend unpacks before it
 binds its port. Subsequent launches are fast.
@@ -250,15 +254,28 @@ model is recorded in the reply metadata and the backend log.
 
 ## RAG Library
 
-The app automatically syncs legal documents daily at noon:
+The app syncs legal documents automatically via the Indian Kanoon API —
+daily at noon by default, configurable as a cron expression in Settings.
+No manual steps are required after initial setup.
+
+Indexed sources:
 - IT Act 2025 (section-wise)
 - IT Act 1961 (key sections)
 - Finance Acts
 - IT Rules 1962
-- CBDT circulars/notifications (auto-fetched via Indian Kanoon)
+- CBDT circulars/notifications
 
-Documents are fetched automatically daily at noon via the
-Indian Kanoon API. No manual steps required after initial setup.
+**Manual ingest.** PDFs you drop into the RAG docs folder are indexed
+alongside the synced corpus — useful for documents Indian Kanoon does not
+carry. Open the folder from Settings, then trigger a reindex.
+
+**Reindex** wipes the vector store and rebuilds it from disk, re-fetching
+the Indian Kanoon corpus from scratch. Use it after a corrupted index, not
+routinely — a normal sync is incremental and much faster.
+
+First run needs internet to download the ~90 MB embedding model. Until it
+succeeds, retrieval is unavailable and Settings shows a prompt to sync
+once while online. Drafting works regardless.
 
 ---
 
@@ -295,12 +312,17 @@ will not discover a non-default port.
 
 ```
 ├── backend/
-│   ├── main.py              # FastAPI entry point
-│   ├── routes/              # API endpoints
+│   ├── main.py              # FastAPI entry point, CORS + auth guard
+│   ├── paths.py             # dev vs installed path resolution
+│   ├── routes/              # /health /models /upload /generate /rag
 │   ├── services/            # Business logic
 │   │   ├── ollama_client.py # LLM with auto model selection
+│   │   ├── prompts.py       # system prompt + citation anchors
 │   │   ├── rag_scraper.py   # Indian Kanoon API scraper
 │   │   ├── rag_embedder.py  # ChromaDB + embeddings
+│   │   ├── rag_scheduler.py # APScheduler daily sync
+│   │   ├── session_store.py # per-session history on disk
+│   │   ├── docx_writer.py   # Markdown → .docx
 │   │   └── parser.py        # PDF/DOCX/Excel/Image parsing
 │   └── requirements.txt
 ├── frontend/
@@ -312,6 +334,33 @@ will not discover a non-default port.
 ├── backend.spec             # PyInstaller spec
 └── README.md
 ```
+
+---
+
+## Privacy
+
+**Client data never leaves the machine.** Notice text, uploaded files,
+generated replies and session history are processed locally and written
+only to disk. Inference runs against a local Ollama daemon on
+`127.0.0.1:11434` — there is no cloud LLM API, and no telemetry or
+analytics anywhere in the app.
+
+The app does make three kinds of outbound request, none of which carry
+your data:
+
+| Destination | Purpose | When |
+|---|---|---|
+| `api.indiankanoon.org` | Fetch public legal texts for the RAG index | Daily sync (default noon) |
+| `incometaxindia.gov.in` | Optional CBDT PDF scrape (off by default) | Only if enabled in Settings |
+| Hugging Face | One-time download of the ~90 MB embedding model | First run |
+
+These fetch public documents by identifier. They do not transmit notice
+text, uploaded files, replies, or any identifying information.
+
+**For a strictly air-gapped install**, disable the sync in Settings. The
+app still drafts replies; retrieval is unavailable until the index is
+populated. Model downloads and the embedding model must be present
+beforehand.
 
 ---
 

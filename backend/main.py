@@ -235,8 +235,16 @@ def run() -> None:
 
     # Bind to 127.0.0.1 only — strictly local. log_config=None so our root
     # handlers (rotating file + stderr) own all output.
+    #
+    # Pass the app OBJECT, not the "main:app" import string. The string form
+    # makes uvicorn re-import a module named `main`, which does not exist
+    # inside a PyInstaller bundle — there main.py is the __main__ script, not
+    # an importable module on sys.path. That failed with "Error loading ASGI
+    # app. Could not import module 'main'." and the packaged backend exited 1
+    # before ever binding a port. Running from source worked either way, so
+    # this only ever reproduced in the frozen build.
     uvicorn.run(
-        "main:app",
+        app,
         host="127.0.0.1",
         port=port,
         reload=False,

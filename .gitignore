@@ -34,11 +34,6 @@ backend/config.json
 backend/auth_token.txt
 backend/port.txt
 
-# Electron build cache
-frontend/dist/
-frontend/build/
-frontend/dist-electron/
-
 # Session files quarantined after a failed read (services/session_store.py)
 backend/data/*.corrupt-*
 
@@ -59,13 +54,11 @@ backend/rag/debug_*.png
 # Project-root screenshots
 /*.png
 
-# Frontend build cache
+# Frontend / Electron build cache
 frontend/.vite/
-frontend/dist/
 frontend/build/
 frontend/out/
-
-# Electron build cache
+frontend/dist-electron/
 frontend/win-unpacked/
 
 # Type declaration cache

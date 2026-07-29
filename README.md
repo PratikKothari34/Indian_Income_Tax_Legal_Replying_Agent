@@ -6,6 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11-green)
 ![Electron](https://img.shields.io/badge/Electron-37-blue)
 ![Status: Active](https://img.shields.io/badge/Status-Active-brightgreen)
+[![Download](https://img.shields.io/github/v/release/PratikKothari34/Indian_Income_Tax_Legal_Replying_Agent?label=Download&color=success)](https://github.com/PratikKothari34/Indian_Income_Tax_Legal_Replying_Agent/releases/latest)
 
 > A fully local Windows desktop application for Indian income tax
 > professionals to draft formal replies to ITD notices using
@@ -48,16 +49,30 @@
 
 ---
 
-## Prerequisites
+## Download
 
-### Build machine (developer)
-- Windows 10/11 x64
-- Python 3.11+ in PATH
-- Node.js 20+ in PATH (24.x tested)
-- Tesseract OCR from UB Mannheim at the default install path
-- Internet connection
+Get the latest installer from the
+[**Releases**](https://github.com/PratikKothari34/Indian_Income_Tax_Legal_Replying_Agent/releases/latest)
+page — download `ITaxReplyAgent-Setup.exe` and follow
+[Installation](#installation) below. Building from source is **not**
+required to run the app; see
+[Building from Source](#building-from-source) only if you want to
+compile it yourself.
 
-### Deploy machine (end user)
+Each release lists the installer's SHA256. Verify the download before
+running it:
+
+```powershell
+Get-FileHash .\ITaxReplyAgent-Setup.exe -Algorithm SHA256
+```
+
+The installer is unsigned, so Windows SmartScreen will warn on first
+run. That is expected — see [Installation](#installation) step 2.
+
+---
+
+## Requirements
+
 - Windows 10/11 x64
 - 32 GB RAM recommended (16 GB minimum — replies will be slow)
 - A GPU is **not** required. The 14B models run if **either**
@@ -71,7 +86,35 @@
 
 ---
 
+## Installation
+
+1. Add a Windows Defender exclusion for the installer
+2. Right-click the installer → Properties → Unblock → OK
+3. Run `ITaxReplyAgent-Setup.exe` as Administrator
+4. Fill the config page:
+   - Ollama host/port (defaults fine)
+   - Indian Kanoon API token (free at
+     [api.indiankanoon.org](https://api.indiankanoon.org))
+5. Wait for model downloads (~18GB, needs internet)
+6. First launch downloads the embedding model (~90MB)
+7. After that — **fully offline**
+
+First launch takes 30–60 seconds: the bundled backend unpacks before it
+binds its port. Subsequent launches are fast.
+
+---
+
 ## Building from Source
+
+Only needed if you want to compile the installer yourself — otherwise
+use the [Download](#download) above.
+
+**Build machine requirements**
+- Windows 10/11 x64
+- Python 3.11+ in PATH
+- Node.js 20+ in PATH (24.x tested)
+- Tesseract OCR from UB Mannheim at the default install path
+- Internet connection
 
 ```bash
 # Clone the repository
@@ -82,22 +125,8 @@ cd Indian_Income_Tax_Legal_Replying_Agent
 .\build.bat
 ```
 
-Output: `dist\ITaxReplyAgent-Setup.exe`
-
----
-
-## Installation (Deploy Machine)
-
-1. Add Windows Defender exclusion for the installer
-2. Right-click installer → Properties → Unblock → OK
-3. Run `ITaxReplyAgent-Setup.exe` as Administrator
-4. Fill config page:
-   - Ollama host/port (defaults fine)
-   - Indian Kanoon API token (free at
-     [api.indiankanoon.org](https://api.indiankanoon.org))
-5. Wait for model downloads (~18GB, needs internet)
-6. First launch downloads embedding model (~90MB)
-7. After that — **fully offline**
+Output: `dist\ITaxReplyAgent-Setup.exe` (~470 MB). The script prints the
+installer's size and SHA256 when it finishes.
 
 ---
 

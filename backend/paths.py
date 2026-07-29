@@ -93,10 +93,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # not source.
     "indiankanoon_token": "",
     # Enable the incometaxindia.gov.in /news/*.pdf direct-PDF scraper.
-    # See services/rag_scraper.py::scrape_incometax_pdfs. Setting this to
-    # False disables Phase B of the sync without removing the code (useful
-    # if the source starts returning 403 from your network).
-    "incometax_pdf_scraper_enabled": True,
+    # See services/rag_scraper.py::scrape_incometax_pdfs. Opt-in because
+    # the source is fronted by Akamai and may return 403 depending on the
+    # deploy IP; when it does, the phase spends ~200 HEAD requests per sync
+    # to find nothing. Toggle from the Settings panel.
+    #
+    # Must stay in sync with DEFAULT_CONFIG in frontend/electron/main.ts —
+    # whichever process writes config.json first decides the value a fresh
+    # install gets, so a disagreement here makes the behaviour depend on
+    # boot order.
+    "incometax_pdf_scraper_enabled": False,
     "run_at_startup": False,
     "system_tray": True,
     "keep_awake": True,

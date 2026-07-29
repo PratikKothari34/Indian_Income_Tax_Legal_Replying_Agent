@@ -36,12 +36,16 @@ Why JSON-on-disk and not a database?
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from paths import DATA_DIR
+
+log = logging.getLogger("itax.sessions")
 
 #: A session id is either a generated 12-hex token or a caller-supplied
 #: value continuing an existing conversation. It is interpolated straight
@@ -55,6 +59,69 @@ def _path_for(session_id: str) -> Path:
     if not _SESSION_ID_RE.fullmatch(session_id):
         raise ValueError(f"Invalid session id: {session_id!r}")
     return DATA_DIR / f"session_{session_id}.json"
+
+
+def _new_session(sid: str) -> dict:
+    """A fresh, empty session document."""
+    return {
+        "session_id": sid,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "turns": [],
+    }
+
+
+def _load_or_new(path: Path, sid: str) -> dict:
+    """Load an existing session file, or return a fresh one.
+
+    A session file is user-visible state in ``backend/data/`` and can be
+    hand-edited, truncated by a crash mid-write, or synced by OneDrive. Any
+    of those leaves JSON that no longer matches the expected shape. Because
+    :func:`append_turn` sits on the ``/generate`` request path, a malformed
+    file previously surfaced as an HTTP 500 and the user lost the reply that
+    had already been generated.
+
+    Recovery is deliberate rather than silent: the unreadable file is moved
+    aside to ``<name>.corrupt-<timestamp>`` so nothing is destroyed, and a
+    fresh session takes its place. Three shapes are treated as unusable —
+    invalid JSON, a top-level value that is not an object, and a ``turns``
+    field that is missing or not a list.
+    """
+    if not path.exists():
+        return _new_session(sid)
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            session = json.load(f)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+        log.warning("session %s unreadable (%s) — starting a fresh session", sid, e)
+        _quarantine(path)
+        return _new_session(sid)
+
+    if not isinstance(session, dict) or not isinstance(session.get("turns"), list):
+        log.warning(
+            "session %s has an unexpected shape — starting a fresh session", sid
+        )
+        _quarantine(path)
+        return _new_session(sid)
+
+    session.setdefault("session_id", sid)
+    session.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
+    return session
+
+
+def _quarantine(path: Path) -> None:
+    """Rename an unusable session file aside so its contents survive.
+
+    Best-effort: if the rename fails the caller still proceeds with a fresh
+    session, and the write that follows overwrites the bad file. Losing a
+    corrupt file is acceptable; losing the reply the user just waited for
+    is not.
+    """
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    try:
+        path.rename(path.with_suffix(f".json.corrupt-{stamp}"))
+    except OSError as e:
+        log.warning("could not quarantine %s: %s", path.name, e)
 
 
 def append_turn(
@@ -81,15 +148,7 @@ def append_turn(
     sid = session_id or uuid.uuid4().hex[:12]
     path = _path_for(sid)
 
-    if path.exists():
-        with path.open("r", encoding="utf-8") as f:
-            session = json.load(f)
-    else:
-        session = {
-            "session_id": sid,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "turns": [],
-        }
+    session = _load_or_new(path, sid)
 
     session["turns"].append(
         {
@@ -103,7 +162,13 @@ def append_turn(
     )
     session["updated_at"] = datetime.now().isoformat(timespec="seconds")
 
-    with path.open("w", encoding="utf-8") as f:
+    # Write-temp-then-rename, matching paths.save_config. A crash or power
+    # loss part-way through a direct write is what produces the truncated
+    # files _load_or_new has to recover from; os.replace is atomic, so a
+    # reader only ever sees the old file or the complete new one.
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
         json.dump(session, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
     return sid

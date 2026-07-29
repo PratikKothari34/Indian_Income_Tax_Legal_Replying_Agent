@@ -305,9 +305,11 @@ async function ensureBackendRunning(cfg: AppConfig): Promise<number> {
   if (ready === null) {
     latestBackendOnline = false;
     updateTrayMenu();
+    // `python main.py` rather than a pinned uvicorn command: it resolves
+    // the port through the 8000→8003 fallback chain and writes port.txt,
+    // which is what this process reads to find the backend.
     throw new Error(
-      "Backend not running. Start it manually with:\n" +
-        "  cd backend && uvicorn main:app --host 127.0.0.1 --port 8000"
+      "Backend not running. Start it manually with:\n" + "  cd backend && python main.py"
     );
   }
   latestBackendOnline = true;
@@ -533,20 +535,71 @@ function isValidSessionId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
 
-ipcMain.handle("open-output-folder", async (_event, outputFile: string) => {
+/**
+ * Validate a 5-field cron expression before it is written to config.json.
+ *
+ * The backend builds an APScheduler CronTrigger from this value during
+ * startup, so a value it cannot parse stops the backend from booting. The
+ * backend now falls back to its default rather than dying, but rejecting
+ * the input here is what actually tells the user their schedule was wrong
+ * instead of silently ignoring it.
+ *
+ * Ranges are checked per field; the syntax accepted is the subset users
+ * realistically need — a star, a step, a range, and comma-separated lists.
+ */
+function isValidCron(expr: unknown): boolean {
+  if (typeof expr !== "string") return false;
+  const fields = expr.trim().split(/\s+/);
+  if (fields.length !== 5) return false;
+  const ranges: [number, number][] = [
+    [0, 59], // minute
+    [0, 23], // hour
+    [1, 31], // day of month
+    [1, 12], // month
+    // Day of week is 0-6 (Mon-Sun). APScheduler rejects the 7-as-Sunday
+    // form that classic cron allows, so accepting it here would let the
+    // user save a schedule the backend then silently replaces with its
+    // default.
+    [0, 6]
+  ];
+  return fields.every((field, i) => {
+    const [lo, hi] = ranges[i];
+    return field.split(",").every((part) => {
+      const [body, step] = part.split("/");
+      if (step !== undefined && !/^\d+$/.test(step)) return false;
+      if (step !== undefined && Number(step) < 1) return false;
+      if (body === "*") return true;
+      const bounds = body.split("-");
+      if (bounds.length > 2) return false;
+      return bounds.every((n) => {
+        if (!/^\d+$/.test(n)) return false;
+        const v = Number(n);
+        return v >= lo && v <= hi;
+      });
+    });
+  });
+}
+
+ipcMain.handle("open-output-folder", async (_event, outputFile: unknown) => {
+  // The folder opened when no valid target is supplied, and the root that
+  // a supplied target must sit under. In dev the backend writes to
+  // backend/output, not AppData — validating against AppData there would
+  // reject every real path and silently open the wrong (empty) folder.
+  const fallbackDir = outputDir();
+  const baseDir = app.isPackaged ? APPDATA_BASE_DIR : path.resolve(__dirname, "../../backend");
+
   if (!outputFile || typeof outputFile !== "string") {
-    // Open the default output folder if nothing specific was requested.
-    const result = await shell.openPath(APPDATA_OUTPUT_DIR);
+    const result = await shell.openPath(fallbackDir);
     return result ? { ok: false, error: result } : { ok: true };
   }
-  // Validate the resolved folder stays inside BASE_DIR before handing it
+  // Validate the resolved folder stays inside baseDir before handing it
   // to the OS shell — rejects path traversal (e.g. ..\..). The path.sep
   // suffix stops a sibling-prefix bypass (e.g. ...\ITaxReplyAgent_evil).
   const folder = path.resolve(path.dirname(outputFile));
-  const base = path.resolve(APPDATA_BASE_DIR);
+  const base = path.resolve(baseDir);
   if (folder !== base && !folder.startsWith(base + path.sep)) {
-    await frontendLog(`open-output-folder: rejected path outside BASE_DIR: ${folder}`);
-    const result = await shell.openPath(APPDATA_OUTPUT_DIR);
+    await frontendLog(`open-output-folder: rejected path outside base dir: ${folder}`);
+    const result = await shell.openPath(fallbackDir);
     return result ? { ok: false, error: result } : { ok: true };
   }
   const result = await shell.openPath(folder);
@@ -654,6 +707,12 @@ ipcMain.handle("save-config", async (_event, next: Partial<AppConfig>) => {
     }
     if (merged.backend_port === merged.ollama_port) {
       return { success: false, error: "backend_port and ollama_port must differ." };
+    }
+    if (!isValidCron(merged.rag_sync_schedule)) {
+      return {
+        success: false,
+        error: "Sync schedule must be 5 cron fields, e.g. \"0 12 * * *\" for daily at noon."
+      };
     }
     await fs.mkdir(APPDATA_BASE_DIR, { recursive: true });
     await fs.writeFile(APPDATA_CONFIG_PATH, JSON.stringify(merged, null, 2), "utf-8");

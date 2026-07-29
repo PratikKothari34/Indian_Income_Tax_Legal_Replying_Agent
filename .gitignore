@@ -34,6 +34,10 @@ backend/port.txt
 # Electron build cache
 frontend/dist/
 frontend/build/
+frontend/dist-electron/
+
+# Session files quarantined after a failed read (services/session_store.py)
+backend/data/*.corrupt-*
 
 # OS
 .DS_Store

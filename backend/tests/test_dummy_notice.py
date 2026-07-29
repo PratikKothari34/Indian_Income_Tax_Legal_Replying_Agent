@@ -19,7 +19,25 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 
-BASE = "http://127.0.0.1:8000"
+def _backend_base() -> str:
+    """Resolve the backend URL, honouring the port the backend actually bound.
+
+    The backend falls through 8000 → 8003 when a port is taken and records
+    the winner in ``port.txt``. Hardcoding 8000 made this test fail with a
+    connection error whenever that fallback had kicked in, which reads as
+    "the backend is down" rather than "the test looked at the wrong port".
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from paths import PORT_FILE
+
+        port = int(PORT_FILE.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError, ImportError):
+        port = 8000
+    return f"http://127.0.0.1:{port}"
+
+
+BASE = _backend_base()
 
 DUMMY_NOTICE = """
 INCOME TAX DEPARTMENT

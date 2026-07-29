@@ -41,6 +41,7 @@ persisted to ``backend/uploads/`` so the user can re-parse or audit
 later without re-uploading.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -84,6 +85,30 @@ def _content_matches_ext(ext: str, data: bytes) -> bool:
         # occasionally after a few leading bytes rather than at offset 0.
         return b"%PDF" in data[:1024]
     return any(data.startswith(sig) for sig in signatures)
+
+
+def _unique_path(path: Path) -> Path:
+    """Return ``path``, or ``name (2).ext`` / ``name (3).ext`` if it exists.
+
+    Uploads are keyed on the client-supplied basename, and the names that
+    arrive here are rarely distinctive — "notice.pdf" and "26AS.pdf" repeat
+    across cases. A straight write meant the second upload replaced the
+    first on disk while both sessions still recorded the same path, so the
+    stored copy no longer matched the notice the earlier reply was drafted
+    from. That matters here: the saved file is the audit trail for a legal
+    document.
+
+    Falls back to the timestamped form after 999 collisions so a pathological
+    directory cannot spin this loop.
+    """
+    if not path.exists():
+        return path
+    for n in range(2, 1000):
+        candidate = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return path.with_name(f"{path.stem}_{stamp}{path.suffix}")
 
 
 @router.post("/upload")
@@ -131,6 +156,7 @@ async def upload_document(file: UploadFile = File(...)):
     # UPLOAD_DIR even after normalisation / symlink resolution.
     if saved_path.parent != upload_root:
         raise HTTPException(status_code=400, detail="Invalid file path.")
+    saved_path = _unique_path(saved_path)
     saved_path.write_bytes(data)
 
     try:
@@ -141,7 +167,9 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Failed to parse file: {e}")
 
     return {
-        "filename": safe_name,
+        # The name actually written, which differs from the uploaded name
+        # when _unique_path resolved a collision.
+        "filename": saved_path.name,
         "saved_path": str(saved_path),
         "char_count": len(text),
         "text": text,

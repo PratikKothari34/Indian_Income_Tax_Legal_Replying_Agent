@@ -618,9 +618,9 @@ def _build_ik_queries() -> tuple[dict[str, str], ...]:
     restrict ``doctypes`` to ``"laws"`` — Indian Kanoon's only useful
     bucket for our purposes — because IK does not index CBDT circulars
     or notifications as standalone documents. (CBDT material is fetched
-    via :func:`scrape_taxguru` instead.) The actual ``doctypes:<bucket>``
-    selector is appended **inline** to ``formInput`` at the call site;
-    the separate POST body field is ignored by the API.
+    by :func:`scrape_incometax_pdfs` instead.) The actual
+    ``doctypes:<bucket>`` selector is appended **inline** to ``formInput``
+    at the call site; the separate POST body field is ignored by the API.
 
     Year-anchored queries use :func:`datetime.now`, so coverage rolls
     forward automatically each January.

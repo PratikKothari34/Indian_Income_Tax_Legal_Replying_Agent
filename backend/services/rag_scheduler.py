@@ -235,12 +235,60 @@ async def run_sync() -> dict[str, Any]:
 # Scheduler wiring
 # ---------------------------------------------------------------------------
 def _parse_cron(expr: str | None) -> tuple[str, str, str, str, str]:
-    """Parse a 5-field cron string ``"m h dom mon dow"`` for APScheduler."""
+    """Parse a 5-field cron string ``"m h dom mon dow"`` for APScheduler.
+
+    Field *count* is not enough on its own: ``"99 99 99 99 99"`` has five
+    fields but every one is out of range, and APScheduler only discovers
+    that when :class:`CronTrigger` is constructed. Since ``init_scheduler``
+    runs at import time in ``main.py``, an unbuildable expression there
+    took the whole backend down at startup rather than just disabling the
+    sync. ``rag_sync_schedule`` is user-editable from the Settings panel,
+    so that was reachable without touching a config file by hand.
+
+    We therefore build a throwaway trigger here and fall back to the
+    default on any rejection, guaranteeing the value we return is one
+    APScheduler will accept.
+    """
     fields = (expr or _default_cron_expr).split()
     if len(fields) != 5:
-        log.warning("invalid cron %r — using default %r", expr, _default_cron_expr)
+        log.warning(
+            "cron %r does not have 5 fields — using default %r",
+            expr,
+            _default_cron_expr,
+        )
+        fields = _default_cron_expr.split()
+    elif not _cron_fields_valid(fields):
+        log.warning(
+            "cron %r is not a valid schedule — using default %r",
+            expr,
+            _default_cron_expr,
+        )
         fields = _default_cron_expr.split()
     return tuple(fields)  # type: ignore[return-value]
+
+
+def _cron_fields_valid(fields: list[str]) -> bool:
+    """True if APScheduler can build a CronTrigger from these five fields.
+
+    Returns ``True`` when APScheduler is not installed — the caller logs
+    that separately and disables the scheduler outright, so there is no
+    schedule left to validate.
+    """
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+    except ImportError:  # pragma: no cover
+        return True
+    try:
+        CronTrigger(
+            minute=fields[0],
+            hour=fields[1],
+            day=fields[2],
+            month=fields[3],
+            day_of_week=fields[4],
+        )
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def _should_run_now() -> bool:
@@ -299,9 +347,18 @@ def init_scheduler(app: Any) -> None:
 
     global _scheduler
     _scheduler = AsyncIOScheduler()
-    trigger = CronTrigger(
-        minute=minute, hour=hour, day=day, month=month, day_of_week=dow
-    )
+    # _parse_cron has already proven these fields build a trigger, so this
+    # should not raise. Belt-and-braces: init_scheduler is called at import
+    # time from main.py, and the RAG sync is a background convenience — it
+    # must never be the reason the backend refuses to start.
+    try:
+        trigger = CronTrigger(
+            minute=minute, hour=hour, day=day, month=month, day_of_week=dow
+        )
+    except (ValueError, TypeError):
+        log.exception("could not build cron trigger — RAG sync disabled this boot")
+        _scheduler = None
+        return
 
     async def _job() -> None:
         try:

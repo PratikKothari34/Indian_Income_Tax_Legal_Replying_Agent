@@ -58,6 +58,19 @@ log = logging.getLogger("itax.generate")
 #: escape backend/data/. Must mirror session_store._SESSION_ID_RE.
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+#: An Ollama model reference — ``name[:tag]``, optionally namespaced
+#: (``library/qwen2.5:14b``). The value reaches the Ollama daemon and is
+#: echoed back in the response and the session file, so it is bounded to
+#: the character set Ollama actually accepts rather than forwarded raw.
+#: Each path segment must start with an alphanumeric, which rejects the
+#: ``..`` segments of a traversal payload while still allowing a genuine
+#: ``namespace/model`` reference.
+_MODEL_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}"      # first (or only) segment
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*"  # optional namespace segments
+    r"(?::[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$" # optional :tag
+)
+
 
 # ---------------------------------------------------------------------------
 # Phase 2 RAG context injection helpers.
@@ -212,6 +225,10 @@ class GenerateRequest(BaseModel):
     history: list[HistoryTurn] | None = Field(default=None, description="Prior turns of this session")
     session_id: str | None = Field(default=None, description="Existing session id to append to")
     temperature: float = Field(0.2, ge=0.0, le=1.0)
+    save_output: bool = Field(
+        False,
+        description="When True, persist the reply as a .docx in backend/output/ and return its path. Defaults to False — callers that only need the text body can skip the disk write entirely.",
+    )
 
     @field_validator("session_id")
     @classmethod
@@ -226,10 +243,24 @@ class GenerateRequest(BaseModel):
         if not _SESSION_ID_RE.fullmatch(v):
             raise ValueError("session_id must be 1-64 characters of [A-Za-z0-9_-]")
         return v
-    save_output: bool = Field(
-        False,
-        description="When True, persist the reply as a .docx in backend/output/ and return its path. Defaults to False — callers that only need the text body can skip the disk write entirely.",
-    )
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, v: str | None) -> str | None:
+        """Constrain the model override to a well-formed Ollama reference.
+
+        ``None`` / ``""`` mean "let the auto-selector choose". Anything else
+        must look like a real model reference: the value is forwarded to the
+        Ollama daemon, stored in the session file, and returned to the
+        client, so an unbounded string has no business travelling that far.
+        """
+        if v in (None, ""):
+            return None
+        if not _MODEL_RE.fullmatch(v):
+            raise ValueError(
+                "model must look like 'name' or 'name:tag' using [A-Za-z0-9._/-]"
+            )
+        return v
 
 
 class GenerateResponse(BaseModel):

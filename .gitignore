@@ -12,6 +12,9 @@ dist-backend/
 build-backend/
 frontend/dist/
 
+# Local build script (releases ship the prebuilt installer instead)
+build.bat
+
 # Node
 frontend/node_modules/
 frontend/.venv/

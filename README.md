@@ -116,17 +116,45 @@ use the [Download](#download) above.
 - Tesseract OCR from UB Mannheim at the default install path
 - Internet connection
 
+Run these from an Administrator prompt at the repository root:
+
 ```bash
-# Clone the repository
 git clone https://github.com/PratikKothari34/Indian_Income_Tax_Legal_Replying_Agent.git
 cd Indian_Income_Tax_Legal_Replying_Agent
 
-# Run build script (as Administrator)
-.\build.bat
+# 1. Backend virtualenv + dependencies
+python -m venv backend\.venv
+backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+
+# 2. Freeze the backend into a single executable
+backend\.venv\Scripts\python.exe -m PyInstaller backend.spec ^
+    --distpath dist-backend --workpath build-backend --noconfirm
+
+# 3. Frontend bundle
+cd frontend
+npm install
+npm run build
+
+# 4. NSIS installer
+npx electron-builder --win --x64
 ```
 
-Output: `dist\ITaxReplyAgent-Setup.exe` (~470 MB). The script prints the
-installer's size and SHA256 when it finishes.
+Output: `dist\ITaxReplyAgent-Setup.exe` (~470 MB).
+
+Verify the result:
+
+```powershell
+Get-FileHash .\dist\ITaxReplyAgent-Setup.exe -Algorithm SHA256
+```
+
+Notes:
+- PyInstaller logs `Hidden import ... not found` for `torch.cuda.*` and
+  `torch.distributed.*` on a CPU-only torch install. These are
+  non-fatal — the build continues and the executable works.
+- Tesseract must be installed before step 2; the spec bundles it from
+  its default install path.
+- The installer is unsigned unless you supply a code-signing
+  certificate to electron-builder.
 
 ---
 
@@ -282,7 +310,6 @@ will not discover a non-default port.
 ├── installer/
 │   └── installer.nsh        # NSIS installer script
 ├── backend.spec             # PyInstaller spec
-├── build.bat                # Build script
 └── README.md
 ```
 

@@ -221,6 +221,14 @@ async def run_sync() -> dict[str, Any]:
     if _sync_lock is None:
         _sync_lock = asyncio.Lock()
 
+    # Skip rather than queue: POST /rag/sync is fire-and-forget, so a second
+    # caller that waited on the lock would fire a duplicate scrape the moment
+    # the first finished.
+    #
+    # The check and the acquire below are atomic despite being two statements:
+    # asyncio is single-threaded, and acquiring an uncontended lock completes
+    # without yielding to the event loop, so no other coroutine can interleave
+    # between them.
     if _sync_lock.locked():
         log.info("run_sync: skipped — another sync is already in progress")
         return {"skipped": True, "reason": "already running"}

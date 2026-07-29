@@ -2,8 +2,6 @@ import type {
   GenerateRequest,
   GenerateResponse,
   HealthResponse,
-  ModelInfo,
-  ModelsResponse,
   UploadError,
   UploadResponse
 } from "../types/api";
@@ -86,29 +84,6 @@ export async function getHealth(): Promise<HealthResponse> {
     throw new Error("Health check failed.");
   }
   return response.json() as Promise<HealthResponse>;
-}
-
-export async function getModels(): Promise<ModelInfo[]> {
-  const response = await apiFetch("/models");
-  if (!response.ok) {
-    throw new Error("Model list failed.");
-  }
-
-  const body = (await response.json()) as ModelsResponse;
-  if (Array.isArray(body)) {
-    return body;
-  }
-
-  return Array.isArray(body.models) ? body.models : [];
-}
-
-export function pickDefaultModel(models: ModelInfo[]): string {
-  return (
-    models.find((model) => model.name === "qwen2.5:14b")?.name ??
-    models.find((model) => model.name === "deepseek-r1:14b")?.name ??
-    models[0]?.name ??
-    ""
-  );
 }
 
 export async function uploadFile(file: File): Promise<UploadResponse> {

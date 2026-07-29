@@ -914,7 +914,12 @@ def scrape_incometax_pdfs() -> dict[str, Any]:
     except Exception as e:
         log.warning("[incometax] could not read config: %s", e)
         cfg = {}
-    if not bool(cfg.get("incometax_pdf_scraper_enabled", True)):
+    # Default False, matching DEFAULT_CONFIG in paths.py and the Electron
+    # shell's DEFAULT_CONFIG. Defaulting True here meant a config.json that
+    # predates the flag ran the phase the other two components report as
+    # off — ~200 HEAD requests per sync against an Akamai-fronted host that
+    # usually 403s them.
+    if not bool(cfg.get("incometax_pdf_scraper_enabled", False)):
         log.info("[incometax] disabled by config flag — skipping phase")
         return {"downloaded": [], "errors": [], "sources_ok": [], "sources_bad": []}
 
@@ -1004,8 +1009,17 @@ def scrape_incometax_pdfs() -> dict[str, Any]:
 
                         save_dir = RAG_DOCS_DIR / doc_type
                         save_dir.mkdir(parents=True, exist_ok=True)
-                        fname = hit_url.rsplit("/", 1)[-1]
-                        save_path = save_dir / fname
+                        # Derive the filename from the URL, but never trust it
+                        # verbatim: follow_redirects is on, so the last path
+                        # segment is ultimately whatever the remote host
+                        # decided. A trailing slash yields an empty stub (which
+                        # would make write_bytes target the directory itself),
+                        # and a traversal segment must not escape save_dir.
+                        # Mirrors the IK path, which already sanitises.
+                        stub = _sanitize_filename_part(
+                            Path(hit_url.rsplit("/", 1)[-1]).stem
+                        )
+                        save_path = save_dir / f"{stub}.pdf"
                         try:
                             save_path.write_bytes(g.content)
                         except OSError as e:

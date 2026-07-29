@@ -1,4 +1,15 @@
-import { app, BrowserWindow, Menu, Tray, ipcMain, shell, dialog, nativeImage, powerSaveBlocker } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  ipcMain,
+  shell,
+  dialog,
+  nativeImage,
+  powerSaveBlocker,
+  session
+} from "electron";
 import fs from "node:fs/promises";
 import { existsSync, unlinkSync } from "node:fs";
 import os from "node:os";
@@ -370,6 +381,59 @@ function installApplicationMenu(): void {
     { label: "View", submenu: viewSubmenu }
   ]);
   Menu.setApplicationMenu(menu);
+}
+
+/**
+ * Attach a Content-Security-Policy to every response the renderer loads.
+ *
+ * contextIsolation + sandbox already stop a compromised renderer from
+ * reaching Node, but nothing previously constrained what the page itself
+ * could load or connect to. The notice text and model output rendered here
+ * are untrusted input; a CSP means that even if markup ever reaches the DOM,
+ * it cannot pull a remote script or exfiltrate a draft to an outside host.
+ *
+ * Directive notes:
+ *  - `connect-src` is pinned to the loopback backend. The port is dynamic
+ *    (8000-8003 fallback), so all four are listed rather than just the
+ *    resolved one — the window may load before the port settles.
+ *  - `style-src` needs 'unsafe-inline': Fluent UI (Griffel) injects styles
+ *    into <style> tags at runtime and has no nonce hook.
+ *  - `script-src` deliberately gets NO 'unsafe-inline' / 'unsafe-eval'.
+ *  - Dev additionally allows the Vite server + its HMR websocket.
+ */
+function installContentSecurityPolicy(): void {
+  const backendOrigins = [8000, 8001, 8002, 8003]
+    .flatMap((p) => [`http://127.0.0.1:${p}`, `http://localhost:${p}`])
+    .join(" ");
+
+  const scriptSrc = app.isPackaged ? "'self'" : `'self' 'unsafe-inline' ${DEV_URL}`;
+  const connectSrc = app.isPackaged
+    ? `'self' ${backendOrigins}`
+    : `'self' ${backendOrigins} ${DEV_URL} ws://127.0.0.1:5173`;
+
+  const policy = [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    `connect-src ${connectSrc}`,
+    "object-src 'none'",
+    "frame-src 'none'",
+    "worker-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'"
+  ].join("; ");
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [policy]
+      }
+    });
+  });
 }
 
 function isAllowedNavigation(url: string): boolean {
@@ -772,6 +836,8 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    // Must run before any window loads so the very first response carries it.
+    installContentSecurityPolicy();
     installApplicationMenu();
     try {
       if (app.isPackaged) {

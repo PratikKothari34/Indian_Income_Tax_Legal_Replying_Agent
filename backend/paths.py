@@ -86,8 +86,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # SECURITY: This field is intentionally blank in source. The real token
     # must be written into config.json at runtime (AppData on a packaged
     # install, backend/ in dev) via one of:
-    #   * the NSIS installer config page (planned),
-    #   * the in-app Settings panel (planned),
+    #   * the NSIS installer config page (installer/installer.nsh),
+    #   * the in-app Settings panel,
     #   * a hand edit by the developer for local testing.
     # Never commit a populated token here — config.json is per-install state,
     # not source.

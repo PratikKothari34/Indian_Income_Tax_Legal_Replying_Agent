@@ -210,7 +210,7 @@ let systemTrayEnabled = DEFAULT_CONFIG.system_tray;
 let keepAwakeBlockerId: number | null = null;
 let latestBackendOnline = false;
 
-function pingHealth(port: number, timeoutMs = 2000): Promise<boolean> {
+function pingHealth(port: number, timeoutMs = 5000): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.request(
       { host: "127.0.0.1", port, path: "/health", method: "GET", timeout: timeoutMs },
@@ -266,12 +266,26 @@ async function spawnBackend(): Promise<void> {
 async function waitForBackend(timeoutMs: number): Promise<number | null> {
   const start = Date.now();
   let port = resolvedBackendPort;
+  let attempt = 0;
   while (Date.now() - start < timeoutMs) {
     const override = await readPortOverride();
     if (override) port = override;
     if (await pingHealth(port)) {
+      const secs = Math.round((Date.now() - start) / 1000);
+      await frontendLog(`backend healthy on :${port} after ${secs}s`);
       resolvedBackendPort = port;
       return port;
+    }
+    // A onefile cold start is tens of seconds of silence. Log every ~10 s so a
+    // slow boot is distinguishable from a hung one in frontend.log.
+    if (++attempt % 5 === 0) {
+      const secs = Math.round((Date.now() - start) / 1000);
+      await frontendLog(`waiting for backend on :${port} (${secs}s elapsed)`);
+    }
+    // Spawned backend died outright — no point burning the rest of the budget.
+    if (app.isPackaged && backendProcess === null) {
+      await frontendLog("backend process exited during startup; abandoning wait");
+      return null;
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
@@ -294,7 +308,14 @@ async function ensureBackendRunning(cfg: AppConfig): Promise<number> {
     // Production: we own the backend lifecycle. Spawn the bundled
     // backend.exe and poll until it answers /health.
     await spawnBackend();
-    const ready = await waitForBackend(30_000);
+    // 120 s, not 30 s. backend.exe is a ~354 MB PyInstaller --onefile bundle:
+    // the bootloader unpacks it to a temp dir and re-execs before uvicorn even
+    // starts, so a measured cold start on a warm cache is ~23 s to the first
+    // HTTP 200. The first launch after install is slower still — Defender
+    // scans the freshly written exe and the file cache is cold — which pushed
+    // it past 30 s and produced "Backend failed to start" against a backend
+    // that was mid-boot and went on to come up fine seconds later.
+    const ready = await waitForBackend(120_000);
     if (ready === null) {
       latestBackendOnline = false;
       updateTrayMenu();

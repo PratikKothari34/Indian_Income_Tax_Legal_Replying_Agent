@@ -63,3 +63,7 @@ frontend/win-unpacked/
 
 # Type declaration cache
 frontend/**/*.tsbuildinfo
+
+# Test caches
+backend/.pytest_cache/
+.pytest_cache/

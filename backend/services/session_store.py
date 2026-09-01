@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,24 @@ from pathlib import Path
 from paths import DATA_DIR
 
 log = logging.getLogger("itax.sessions")
+
+#: Serialises the read-modify-write in :func:`append_turn`.
+#:
+#: ``POST /generate`` is a sync FastAPI endpoint, so Starlette runs it in a
+#: worker thread and two requests genuinely execute in parallel. Generation
+#: takes minutes, which makes overlap easy to hit — a second window, or a
+#: script driving the documented HTTP API. Without this lock, concurrent
+#: appends to one session raced three ways: turns were silently lost
+#: (both writers started from the same snapshot), ``os.replace`` failed
+#: with ``PermissionError`` on Windows because another writer still held
+#: the destination open, and a reader that caught a half-written file
+#: quarantined a perfectly good session as "corrupt".
+#:
+#: One process-wide lock is enough because the backend runs as a single
+#: uvicorn worker; the critical section is a small JSON dump, so contention
+#: is not a concern. It does NOT protect against a second backend process
+#: writing the same directory, which the app never starts.
+_write_lock = threading.Lock()
 
 #: A session id is either a generated 12-hex token or a caller-supplied
 #: value continuing an existing conversation. It is interpolated straight
@@ -148,27 +167,47 @@ def append_turn(
     sid = session_id or uuid.uuid4().hex[:12]
     path = _path_for(sid)
 
-    session = _load_or_new(path, sid)
+    # The whole load-append-write cycle is one critical section: reading
+    # and writing under separate locks would still let two writers start
+    # from the same snapshot and drop one of the turns.
+    with _write_lock:
+        session = _load_or_new(path, sid)
 
-    session["turns"].append(
-        {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "model": model,
-            "notice_text": notice_text,
-            "query": query,
-            "reply": reply,
-            "output_file": output_file,
-        }
-    )
-    session["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        session["turns"].append(
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "model": model,
+                "notice_text": notice_text,
+                "query": query,
+                "reply": reply,
+                "output_file": output_file,
+            }
+        )
+        session["updated_at"] = datetime.now().isoformat(timespec="seconds")
 
-    # Write-temp-then-rename, matching paths.save_config. A crash or power
-    # loss part-way through a direct write is what produces the truncated
-    # files _load_or_new has to recover from; os.replace is atomic, so a
-    # reader only ever sees the old file or the complete new one.
-    tmp = path.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(session, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+        # Write-temp-then-rename, matching paths.save_config. A crash or
+        # power loss part-way through a direct write is what produces the
+        # truncated files _load_or_new has to recover from; os.replace is
+        # atomic, so a reader only ever sees the old file or the complete
+        # new one.
+        #
+        # The temp name carries a unique suffix rather than a fixed
+        # ".json.tmp". A shared name is its own race even under the lock:
+        # any other writer in this directory — a second process, or a
+        # future caller that forgets the lock — would write the same path,
+        # and on Windows os.replace then fails outright with
+        # PermissionError instead of quietly overwriting.
+        tmp = path.with_suffix(f".json.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(session, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        except OSError:
+            # Never leave a stray temp file behind on a failed write.
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     return sid

@@ -49,6 +49,45 @@ function localAgent(): (Window["localAgent"] & LocalAgentExtras) | undefined {
   return (window as typeof window & { localAgent?: Window["localAgent"] & LocalAgentExtras }).localAgent;
 }
 
+/**
+ * Validate a 5-field cron expression before the user can submit it.
+ *
+ * Mirrors `isValidCron` in electron/main.ts, which is the authoritative
+ * gate — this copy exists so an invalid schedule is caught while the user
+ * is still looking at the field, instead of coming back as a save error
+ * after the backend has already been asked to restart.
+ *
+ * Day of week is 0-6; APScheduler rejects the 7-as-Sunday form that
+ * classic cron allows, so accepting it here would let a user save a
+ * schedule the backend then silently replaces with its default.
+ */
+function isValidCron(expr: string): boolean {
+  const fields = expr.trim().split(/\s+/);
+  if (fields.length !== 5) return false;
+  const ranges: [number, number][] = [
+    [0, 59], // minute
+    [0, 23], // hour
+    [1, 31], // day of month
+    [1, 12], // month
+    [0, 6] // day of week
+  ];
+  return fields.every((field, i) => {
+    const [lo, hi] = ranges[i];
+    return field.split(",").every((part) => {
+      const [body, step] = part.split("/");
+      if (step !== undefined && (!/^\d+$/.test(step) || Number(step) < 1)) return false;
+      if (body === "*") return true;
+      const bounds = body.split("-");
+      if (bounds.length > 2) return false;
+      return bounds.every((n) => {
+        if (!/^\d+$/.test(n)) return false;
+        const v = Number(n);
+        return v >= lo && v <= hi;
+      });
+    });
+  });
+}
+
 function normalizeConfig(cfg: Config): Config {
   return {
     ...cfg,
@@ -194,6 +233,9 @@ export function SettingsPanel() {
     }
     if (!d.model_storage_path.trim()) {
       return "Model storage path is required.";
+    }
+    if (!isValidCron(d.rag_sync_schedule)) {
+      return 'Sync schedule must be 5 cron fields, e.g. "0 12 * * *" for daily at noon.';
     }
     return null;
   }

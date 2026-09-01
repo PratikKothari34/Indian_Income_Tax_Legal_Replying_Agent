@@ -27,17 +27,34 @@ import ollama
 
 log = logging.getLogger("itax.ollama")
 
-# Client is cached per (host, port) so a config change (the Electron shell
+# Clients are cached per (host, port) so a config change (the Electron shell
 # restarts the backend on save, but the dev backend is long-lived) picks up
 # the new daemon address on the next call without recreating the client on
 # every request.
-_client: ollama.Client | None = None
+#
+# Two clients, not one, because the two call sites have opposite deadlines:
+#
+# * Probes (``list``) back /health, which the Electron shell polls to decide
+#   whether the backend is alive. A daemon that accepts the connection and
+#   then never answers — hung, mid-restart, or a stale port forward — would
+#   stall an untimed probe forever and hang that poll with it.
+# * Generation legitimately runs for minutes on a 14B model, so it must NOT
+#   inherit the probe's short deadline.
+_probe_client: ollama.Client | None = None
+_chat_client: ollama.Client | None = None
 _client_key: tuple[str, int] | None = None
 
+#: Deadline for metadata probes (``list``). Generous enough for a busy
+#: daemon, short enough that /health always returns.
+PROBE_TIMEOUT_SECONDS = 10.0
 
-def _get_client() -> ollama.Client:
-    """Return an ``ollama.Client`` bound to the configured host/port."""
-    global _client, _client_key
+#: Deadline for a chat completion. A 14B model on CPU is slow; this is a
+#: backstop against a wedged daemon, not a performance target.
+CHAT_TIMEOUT_SECONDS = 900.0
+
+
+def _resolve_host() -> tuple[str, int, str]:
+    """Return ``(host, port, base_url)`` from config, with defaults."""
     from paths import load_config
 
     cfg = load_config()
@@ -46,12 +63,34 @@ def _get_client() -> ollama.Client:
         port = int(cfg.get("ollama_port") or 11434)
     except (TypeError, ValueError):
         port = 11434
+    base = host if "://" in host else f"http://{host}:{port}"
+    return host, port, base
+
+
+def _get_client() -> ollama.Client:
+    """Return the short-deadline client used for metadata probes."""
+    global _probe_client, _chat_client, _client_key
+
+    host, port, base = _resolve_host()
     key = (host, port)
-    if _client is None or _client_key != key:
-        base = host if "://" in host else f"http://{host}:{port}"
-        _client = ollama.Client(host=base)
+    if _probe_client is None or _client_key != key:
+        _probe_client = ollama.Client(host=base, timeout=PROBE_TIMEOUT_SECONDS)
+        # The chat client is bound to the same address; drop it so the next
+        # chat() rebuilds against the new host rather than the stale one.
+        _chat_client = None
         _client_key = key
-    return _client
+    return _probe_client
+
+
+def _get_chat_client() -> ollama.Client:
+    """Return the long-deadline client used for chat completions."""
+    global _chat_client
+
+    _get_client()  # resolves config and invalidates on host change
+    if _chat_client is None:
+        _, _, base = _resolve_host()
+        _chat_client = ollama.Client(host=base, timeout=CHAT_TIMEOUT_SECONDS)
+    return _chat_client
 
 #: Spec'd primary model — first choice for standard chat calls.
 PRIMARY_MODEL = "qwen2.5:14b"
@@ -321,7 +360,7 @@ def chat(
             last_err = RuntimeError(f"Model '{candidate}' not pulled locally")
             continue
         try:
-            resp = _get_client().chat(
+            resp = _get_chat_client().chat(
                 model=candidate,
                 messages=messages,
                 options={"temperature": temperature},

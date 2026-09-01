@@ -34,6 +34,7 @@ from typing import Any
 
 from paths import (
     RAG_CHROMADB_DIR,
+    RAG_MODELS_DIR,
     configure_hf_cache,
     get_rag_logger,
 )
@@ -144,12 +145,40 @@ def _open_collection() -> Any:
 
 
 def is_model_available() -> bool:
-    """Cheap check used by ``/rag/status``: does the embedding model load?"""
-    try:
-        _load_model()
+    """Is the embedding model ready to use, without forcing it to load?
+
+    ``GET /rag/status`` drives the first-run "downloading embedding model"
+    banner, and the frontend polls it every 10 s until the model reports
+    ready. Answering by calling :func:`_load_model` made that poll expensive
+    in the one state it exists to describe: with no cached weights, each
+    poll spent tens of seconds and issued outbound huggingface.co requests
+    (with retries) — repeatedly, for an app that is meant to run offline.
+
+    So the check is now positional rather than behavioural:
+
+    * already loaded in this process → ready;
+    * otherwise, are the weights present in the pinned HF cache?
+
+    A snapshot directory holding a config file is what
+    ``SentenceTransformer`` needs to construct without touching the
+    network. Being wrong is cheap in both directions: a false negative
+    leaves the banner up one extra poll, and a false positive surfaces as
+    the same load error the caller already handles.
+    """
+    if _model is not None:
         return True
-    except RuntimeError:
+    configure_hf_cache()
+    cache_root = RAG_MODELS_DIR / (
+        "models--" + EMBED_MODEL_NAME.replace("/", "--")
+    )
+    snapshots = cache_root / "snapshots"
+    if not snapshots.is_dir():
         return False
+    return any(
+        any(snapshot.glob("config.json"))
+        for snapshot in snapshots.iterdir()
+        if snapshot.is_dir()
+    )
 
 
 def collection_size() -> int:
@@ -507,14 +536,27 @@ def query(query_text: str, n_results: int = 5) -> list[dict[str, Any]]:
     """
     if not query_text or not query_text.strip():
         return []
+
+    # Cheap gates first. Opening the collection is ~1 s; loading the
+    # embedding model is tens of seconds on first use and, when the model
+    # is not cached yet, reaches out to huggingface.co and retries before
+    # giving up. An empty store has nothing to match, so paying either
+    # cost would be pure latency on the caller's request path — and on a
+    # fresh install the store IS empty until the first sync completes,
+    # which is exactly when the user makes their first request.
     try:
-        model = _load_model()
         collection = _open_collection()
     except RuntimeError as e:
         log.warning("query unavailable: %s", e)
         return []
 
     if collection_size() == 0:
+        return []
+
+    try:
+        model = _load_model()
+    except RuntimeError as e:
+        log.warning("query unavailable: %s", e)
         return []
 
     try:

@@ -17,6 +17,7 @@ import logging
 import logging.handlers
 import os
 import secrets
+import time
 import sys
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,10 @@ def _is_frozen() -> bool:
 def _resolve_base_dir() -> Path:
     """Pick the on-disk root for runtime data.
 
+    * **Test override** → ``$ITAX_BASE_DIR_OVERRIDE`` when that variable is
+      set. The test suite points it at a temp directory so a run never
+      reads or rewrites the developer's real ``config.json`` (which holds
+      a live Indian Kanoon token) or their session history.
     * **Packaged (frozen)** → ``%LOCALAPPDATA%\\ITaxReplyAgent`` — the
       install dir under ``Program Files`` is read-only for normal users.
     * **Dev (running from source)** → the ``backend/`` folder itself, so
@@ -42,6 +47,9 @@ def _resolve_base_dir() -> Path:
       uses for its dev IPC paths, so the Python backend and the Electron
       main process see the same on-disk layout in dev.
     """
+    override = os.environ.get("ITAX_BASE_DIR_OVERRIDE")
+    if override:
+        return Path(override)
     if _is_frozen():
         appdata = os.environ.get("LOCALAPPDATA") or os.path.join(
             os.path.expanduser("~"), "AppData", "Local"
@@ -181,13 +189,50 @@ def load_config() -> dict[str, Any]:
     return merged
 
 
+def _replace_with_retry(src: Path, dst: Path, attempts: int = 5) -> None:
+    """``os.replace`` with a short backoff, for Windows sharing violations.
+
+    ``os.replace`` is atomic, but on Windows it fails with ``PermissionError``
+    when another process has the destination open — including another writer
+    performing the same swap, or a scanner that opened the file a moment
+    earlier. The condition is transient and clears in milliseconds, so a
+    bounded retry converts a spurious crash into a slightly delayed write.
+    The final attempt is allowed to raise.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
 def save_config(cfg: dict[str, Any]) -> None:
-    """Write ``cfg`` to ``config.json`` atomically (write-temp-then-rename)."""
+    """Write ``cfg`` to ``config.json`` atomically (write-temp-then-rename).
+
+    The temp file carries a unique suffix rather than a fixed
+    ``.json.tmp``. Two backends can legitimately share one ``BASE_DIR``:
+    the port-fallback chain (8000 → 8003) exists precisely so a second
+    instance can start alongside the first, and both write their resolved
+    port back here. With a shared temp name they would write the same
+    path, and on Windows ``os.replace`` then fails with ``PermissionError``
+    while the other process still holds it open — turning a routine config
+    write into a startup crash.
+    """
     ensure_dirs()
-    tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, CONFIG_PATH)
+    tmp = CONFIG_PATH.with_suffix(f".json.{os.getpid()}-{secrets.token_hex(4)}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        _replace_with_retry(tmp, CONFIG_PATH)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def write_port(port: int) -> None:

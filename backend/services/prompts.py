@@ -189,6 +189,50 @@ CONSTRAINTS
 """
 
 
+# ---------------------------------------------------------------------------
+# Sandbox-delimiter defence.
+#
+# SYSTEM_PROMPT tells the model that anything between the BEGIN/END DOCUMENT
+# markers is untrusted data and must never be obeyed as an instruction. That
+# guarantee only holds while the markers themselves cannot be forged: a
+# notice whose own text contains "-----END DOCUMENT-----" closes the sandbox
+# early, and everything after it reads as trusted content in the same user
+# turn.
+#
+# The uploaded notice is exactly the untrusted input this defends against —
+# it arrives as a PDF/DOCX/image the user did not write, and OCR or a text
+# layer will carry these strings through verbatim. The RAG path already
+# scrubs the equivalent tokens from retrieved chunks (see
+# routes/generate.py::_sanitize_rag_chunk); this is the same defence applied
+# to the primary input path.
+#
+# The RAG block's markers are included too: a notice that forges
+# "--- RELEVANT CBDT DOCUMENTS ---" could otherwise present fabricated
+# circular numbers as though they had been retrieved from the vector store,
+# defeating the citation-integrity rule the system prompt turns on.
+_SANDBOX_TOKENS: tuple[str, ...] = (
+    "-----BEGIN DOCUMENT-----",
+    "-----END DOCUMENT-----",
+    "[RAG DOCUMENT START]",
+    "[RAG DOCUMENT END]",
+    "--- RELEVANT CBDT DOCUMENTS ---",
+    "--- END CBDT DOCUMENTS ---",
+)
+
+
+def _neutralise_delimiters(text: str) -> str:
+    """Defang any sandbox delimiter a document tries to forge.
+
+    The marker is broken rather than deleted, so the reader still sees that
+    something was there and the surrounding legal text keeps its shape. A
+    genuine income-tax notice never contains these strings.
+    """
+    cleaned = text
+    for token in _SANDBOX_TOKENS:
+        cleaned = cleaned.replace(token, "[filtered delimiter]")
+    return cleaned
+
+
 def build_messages(notice_text: str, query: str, history: list[dict] | None) -> list[dict]:
     """Compose the chat-message array for an Ollama chat call.
 
@@ -219,6 +263,9 @@ def build_messages(notice_text: str, query: str, history: list[dict] | None) -> 
                 messages.append({"role": role, "content": content})
 
     user_block_parts = []
+    # Strip forged sandbox markers before the text is wrapped in real ones.
+    notice_text = _neutralise_delimiters(notice_text or "")
+    query = _neutralise_delimiters(query or "")
     if notice_text and notice_text.strip():
         # Detect spreadsheet output from services/parser.py — the xlsx /
         # xls parsers prefix each sheet with "# Sheet: <name>". When that

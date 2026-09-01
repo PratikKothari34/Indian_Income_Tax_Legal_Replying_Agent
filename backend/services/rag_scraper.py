@@ -28,13 +28,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from paths import RAG_DOCS_DIR, RAG_SYNC_STATUS, get_rag_logger, load_config
+from paths import (
+    RAG_DOCS_DIR,
+    RAG_SYNC_STATUS,
+    _replace_with_retry,
+    get_rag_logger,
+    load_config,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -185,10 +193,20 @@ def _save_known_urls(known: set[str], extra: dict[str, Any] | None = None) -> No
     current["known_urls"] = sorted(known)
     if extra:
         current.update(extra)
-    tmp = RAG_SYNC_STATUS.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(current, f, indent=2, ensure_ascii=False)
-    tmp.replace(RAG_SYNC_STATUS)
+    # Unique temp name + retrying replace, matching paths.save_config —
+    # the scheduler writes this same file, and a reindex can remove it
+    # mid-sync, so the swap must survive a transient sharing violation.
+    tmp = RAG_SYNC_STATUS.with_suffix(f".json.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(current, f, indent=2, ensure_ascii=False)
+        _replace_with_retry(tmp, RAG_SYNC_STATUS)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -400,11 +418,62 @@ def _read_ik_token() -> str:
         return ""
 
 
+#: Connection-pooled client for the Indian Kanoon API, opened once per
+#: sync by :func:`_ik_session` and closed when that sync ends.
+#:
+#: A full sync issues up to 250 requests to one host (50 searches plus two
+#: calls per downloaded document). Building a fresh ``httpx.Client`` per
+#: request meant 250 TCP connections and 250 TLS handshakes to the same
+#: endpoint — roughly 100-200 ms of pure setup each, all of it avoidable.
+#: One pooled client keeps the connection alive across the whole run.
+_ik_client: Any = None
+
+
+class _ik_session:
+    """Context manager holding one pooled client open for a sync run.
+
+    Re-entrant by design: :func:`scrape_indian_kanoon` opens the session and
+    the ``_ik_*`` helpers below simply use whatever is open. If none is (a
+    helper called directly, as the tests do), :func:`_ik_post` falls back to
+    a single-use client so behaviour is unchanged.
+    """
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def __enter__(self) -> None:
+        global _ik_client
+        try:
+            import httpx
+        except ImportError:
+            return None
+        _ik_client = httpx.Client(
+            timeout=IK_TIMEOUT_SECONDS,
+            headers={
+                "Authorization": f"Token {self._token}",
+                "Accept": "application/json",
+                "User-Agent": _UA,
+            },
+        )
+        return None
+
+    def __exit__(self, *exc: Any) -> None:
+        global _ik_client
+        client, _ik_client = _ik_client, None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
 def _ik_post(url: str, token: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """POST to an Indian Kanoon endpoint. Returns JSON dict or ``None`` on failure.
 
-    Handles 403 (bad token), 429 (rate limited — one short retry), and
-    transport errors. Never raises into the scheduler.
+    Uses the pooled client opened by :class:`_ik_session` when one is
+    active, otherwise falls back to a single-use client. Handles 403 (bad
+    token), 429 (rate limited — one short retry), and transport errors.
+    Never raises into the scheduler.
     """
     try:
         import httpx
@@ -421,8 +490,12 @@ def _ik_post(url: str, token: str, params: dict[str, Any] | None = None) -> dict
     while True:
         attempt += 1
         try:
-            with httpx.Client(timeout=IK_TIMEOUT_SECONDS, headers=headers) as client:
-                r = client.post(url, data=params or {})
+            pooled = _ik_client
+            if pooled is not None:
+                r = pooled.post(url, data=params or {})
+            else:
+                with httpx.Client(timeout=IK_TIMEOUT_SECONDS, headers=headers) as client:
+                    r = client.post(url, data=params or {})
         except Exception as e:
             log.warning("[ik] POST %s failed: %s", url, e)
             return None
@@ -675,6 +748,10 @@ def _is_too_old(doc_type: str, iso_date: str) -> bool:
 def scrape_indian_kanoon() -> dict[str, Any]:
     """Search IK for the configured queries, download each new doc as ``.txt``.
 
+    Wraps :func:`_scrape_indian_kanoon_inner` in an :class:`_ik_session` so
+    every request in the run shares one pooled, keep-alive connection
+    instead of opening a fresh TLS handshake per call.
+
     Returns::
 
         {
@@ -684,6 +761,24 @@ def scrape_indian_kanoon() -> dict[str, Any]:
           "sources_bad": [str, ...],
         }
     """
+    token = _read_ik_token()
+    if not token:
+        log.warning(
+            "indiankanoon_token missing or empty — skipping API scrape; "
+            "manual drop-folder ingest still active"
+        )
+        return {
+            "downloaded": [],
+            "errors": ["indiankanoon_token missing"],
+            "sources_ok": [],
+            "sources_bad": [IK_API_BASE],
+        }
+    with _ik_session(token):
+        return _scrape_indian_kanoon_inner()
+
+
+def _scrape_indian_kanoon_inner() -> dict[str, Any]:
+    """Body of the IK scrape. Assumes a pooled client is already open."""
     token = _read_ik_token()
     if not token:
         log.warning(
@@ -1068,16 +1163,54 @@ def scrape_incometax_pdfs() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # One-time chromadb cleanup helpers
 # ---------------------------------------------------------------------------
+#: Marker recorded in ``sync_status.json`` once the Waqf cleanup below has
+#: run to completion. Bump the suffix if a future migration needs to sweep
+#: the collection again.
+_CLEANUP_DONE_KEY = "cleanup_unrelated_v1"
+
+
+def _read_cleanup_done() -> bool:
+    """True once the one-time chunk cleanup has completed."""
+    if not RAG_SYNC_STATUS.exists():
+        return False
+    try:
+        with RAG_SYNC_STATUS.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return bool(payload.get(_CLEANUP_DONE_KEY)) if isinstance(payload, dict) else False
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def _mark_cleanup_done() -> None:
+    """Record that the cleanup has run, so later syncs skip the scan.
+
+    Best-effort: failing to write the marker only costs one redundant scan
+    on the next sync, so it must never break the run.
+    """
+    try:
+        _save_known_urls(_load_known_urls(), extra={_CLEANUP_DONE_KEY: True})
+    except OSError as e:
+        log.warning("[cleanup] could not persist completion marker: %s", e)
+
+
 def _cleanup_unrelated_chunks() -> None:
     """Drop chunks whose ``document_title`` contains ``"waqf"`` (case-insensitive).
 
-    Runs at the top of every :func:`scrape_all_sources` call. The first
-    run after the Waqf-blocking title filter was added (see
-    :data:`IK_TITLE_KEYWORDS`) does the real work; subsequent runs are
-    no-ops because the chunks are already gone and the keyword filter
-    prevents new ones from landing. Chunks are grouped by ``source_url``
-    so we log one tidy line per document instead of one per chunk.
+    A migration for stores built before the Waqf-blocking title filter (see
+    :data:`IK_TITLE_KEYWORDS`) existed. Once it has run, the keyword filter
+    stops new chunks like these from ever landing, so there is nothing left
+    for it to find.
+
+    It therefore runs **once** and records that in ``sync_status.json``.
+    It previously ran at the top of every sync, and while it was a logical
+    no-op after the first pass, each pass still pulled the metadata of
+    every chunk in the collection out of SQLite to discover there was
+    nothing to delete — a cost that grew with the corpus and bought
+    nothing. Chunks are grouped by ``source_url`` so the log gets one tidy
+    line per document rather than one per chunk.
     """
+    if _read_cleanup_done():
+        return
     try:
         from services import rag_embedder
 
@@ -1107,6 +1240,9 @@ def _cleanup_unrelated_chunks() -> None:
         d["ids"].append(cid)
 
     if not by_doc:
+        # Nothing to remove — the store is already clean, so record the
+        # marker and skip the scan from here on.
+        _mark_cleanup_done()
         return
 
     for info in by_doc.values():
@@ -1118,6 +1254,7 @@ def _cleanup_unrelated_chunks() -> None:
             )
         except Exception as e:
             log.warning("[cleanup] delete failed for %r: %s", info["title"], e)
+    _mark_cleanup_done()
 
 
 # ---------------------------------------------------------------------------
@@ -1232,11 +1369,6 @@ def scrape_all_sources() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Helpers consumed elsewhere
 # ---------------------------------------------------------------------------
-def known_url_count() -> int:
-    """Number of distinct dedup keys recorded across all sync runs."""
-    return len(_load_known_urls())
-
-
 def list_local_pdfs() -> Iterable[Path]:
     """Yield every PDF under ``RAG_DOCS_DIR`` (recursive).
 

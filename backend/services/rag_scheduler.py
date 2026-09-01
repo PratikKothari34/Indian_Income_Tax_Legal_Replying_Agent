@@ -23,12 +23,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from paths import (
     RAG_DOCS_DIR,
     RAG_SYNC_STATUS,
+    _replace_with_retry,
     ensure_dirs,
     get_rag_logger,
     load_config,
@@ -66,10 +69,21 @@ def _write_status(updates: dict[str, Any]) -> None:
     ensure_dirs()
     payload = _read_status_raw()
     payload.update(updates)
-    tmp = RAG_SYNC_STATUS.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-    tmp.replace(RAG_SYNC_STATUS)
+    # Unique temp name + retrying replace, matching paths.save_config. The
+    # scraper writes this same file (known_urls) and a reindex can delete
+    # it while a sync is finishing, so the swap must tolerate a transient
+    # Windows sharing violation instead of crashing the sync.
+    tmp = RAG_SYNC_STATUS.with_suffix(f".json.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        _replace_with_retry(tmp, RAG_SYNC_STATUS)
+    except OSError as e:
+        log.warning("could not write sync_status.json: %s", e)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def get_status() -> dict[str, Any]:

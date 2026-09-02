@@ -67,3 +67,6 @@ frontend/**/*.tsbuildinfo
 # Test caches
 backend/.pytest_cache/
 .pytest_cache/
+
+# Code knowledge graph (graphify) - regenerable, ~2.3MB
+graphify-out/

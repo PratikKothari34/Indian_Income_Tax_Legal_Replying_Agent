@@ -70,3 +70,9 @@ backend/.pytest_cache/
 
 # Code knowledge graph (graphify) - regenerable, ~2.3MB
 graphify-out/
+
+# Project instruction file (local-only, see Source of truth inside it)
+CLAUDE.md
+
+# Portable memory copy (local-only mirror of path-keyed memory)
+docs/memory/

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      No remote anything: no Google Fonts link, no CDN script, no remote image.
+      The app has to render identically on a machine with no internet. Fonts are
+      local files under /fonts with a system fallback (see styles/global.css).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:* ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Ledger reply</title>
+    <!--
+      Paints the window before the stylesheet loads. Without this the webview
+      frame is white for the first frame of every launch, which in a dark room
+      is a flash of glare -- and the reason the light theme no longer anchors
+      on #ffffff at all. Duplicated from tokens.css on purpose: this has to
+      apply before that file is parsed. Keep the two in step.
+    -->
+    <style>
+      html { background: #fbfaf7; }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme="light"]) { background: #171b21; }
+      }
+      html[data-theme="dark"] { background: #171b21; }
+      html[data-theme="light"] { background: #fbfaf7; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      The theme is applied before first paint, not in an effect. React mounts
+      one frame later, so setting data-theme from a component would flash the
+      light palette on a dark-theme launch. Inline and tiny for that reason.
+
+      localStorage throws outright in some webview configurations rather than
+      returning null, so the whole read is guarded; failing closed to "system"
+      is correct — tokens.css already honours prefers-color-scheme.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("ledger.theme");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.setAttribute("data-theme", stored);
+          }
+        } catch (e) {
+          /* no persisted preference available — fall through to system */
+        }
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

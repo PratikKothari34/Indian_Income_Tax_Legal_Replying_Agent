@@ -1,0 +1,83 @@
+[package]
+name = "itax-backend-rs"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Rust backend for the Indian Income Tax Legal Replying Agent (llama.cpp inference)"
+license = "UNLICENSED"
+publish = false
+
+# A library plus a thin binary: the integration tests and the Tauri shell
+# both need the router and the service layer without starting a server.
+[lib]
+name = "itax_backend_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "backend-rs"
+path = "src/main.rs"
+
+[dependencies]
+# HTTP server. axum over hyper/tokio; no TLS (binds 127.0.0.1 only).
+axum = { version = "0.7.9", features = ["multipart", "macros"] }
+tokio = { version = "1.43.0", features = ["rt-multi-thread", "macros", "fs", "process", "signal", "time", "sync"] }
+tower = "0.5.2"
+tower-http = { version = "0.6.2", features = ["cors", "limit", "trace"] }
+
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.135"
+
+# Outbound HTTP: llama-server, Indian Kanoon, incometaxindia.
+reqwest = { version = "0.12.12", default-features = false, features = ["json", "rustls-tls", "stream", "multipart"] }
+
+# Embeddings: ONNX all-MiniLM-L6-v2, same model and 384 dims as the Python
+# sentence-transformers path, so vectors are numerically comparable.
+fastembed = "4.9.1"
+
+# Vector store: hand-rolled, no crate. No Rust client can read a Python
+# ChromaDB sqlite+hnsw store, so v2 owns its own under rag/vectors-rs/ and
+# leaves ChromaDB alone. At a few thousand chunks an exact scan of
+# 10k x 384 f32 is sub-millisecond, so an ANN index would add a build step
+# and a corruptible graph for no measurable gain.
+# See services/vector_store.rs.
+
+# Document text extraction.
+pdf-extract = "0.7.12"
+zip = { version = "2.2.2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37.2"
+calamine = "0.26.1"
+
+# DOCX output.
+rust_xlsxwriter = { version = "0.80.0", optional = true }
+
+chrono = { version = "0.4.39", default-features = false, features = ["clock", "std", "serde"] }
+regex = "1.11.1"
+sha2 = "0.10.8"
+hex = "0.4.3"
+rand = "0.8.5"
+dirs = "5.0.1"
+anyhow = "1.0.95"
+thiserror = "2.0.11"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2.3"
+subtle = "2.6.1"
+urlencoding = "2.1.3"
+scraper = "0.22.0"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.9", features = ["processthreadsapi", "winbase", "handleapi", "synchapi"] }
+
+[dev-dependencies]
+tempfile = "3.15.0"
+
+[features]
+default = []
+xlsx-out = ["rust_xlsxwriter"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,245 @@
+/**
+ * Global stylesheet. Tokens first, then Tailwind's layers, then the handful of
+ * element-level rules that are genuinely global.
+ *
+ * `tokens.css` is imported above `@tailwind base` so the custom properties
+ * exist before any utility resolves `var(--paper)`. CSS custom properties are
+ * not order-sensitive at use time, but keeping the declaration first also means
+ * the base layer's `body` colour is never briefly unresolved.
+ */
+
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Fonts
+   ---------------------------------------------------------------------------
+   Self-hosted only — the contract forbids a network call at runtime, so there
+   is no Google Fonts link anywhere in this tree.
+
+   These files are expected at `public/fonts/`. They are deliberately NOT
+   committed as placeholders: an empty or fake .woff2 fails to parse and the
+   browser falls back exactly as it does for a 404, so an absent file is the
+   same outcome with less to go wrong. Every family in tailwind.config.ts ends
+   in a system face (Georgia / Segoe UI / Consolas), which is what renders
+   until the files are dropped in.
+
+   `font-display: swap` keeps text visible through the (local, instant) load,
+   and `unicode-range` is omitted on purpose — subsetting a face that may be
+   absent buys nothing.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Inter Tight";
+  src: url("/fonts/InterTight-Variable.woff2") format("woff2-variations");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Newsreader";
+  src: url("/fonts/Newsreader-Variable.woff2") format("woff2-variations");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Newsreader";
+  src: url("/fonts/Newsreader-Italic-Variable.woff2") format("woff2-variations");
+  font-weight: 400 600;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Variable.woff2") format("woff2-variations");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  /* The app owns the full viewport; a packaged webview has no page scroll. */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  /* The document must never scroll.
+     
+     Every scrollable region in the app is an inner pane with its own
+     `overflow-y-auto`, so a scrollbar on the document means something
+     overflowed the viewport -- and because the title bar is inside the same
+     document, that scrollbar is painted beside it, running the full window
+     height and straight through the caption. It also sits outside the
+     frameless window's inset, so when maximized it lands in the invisible
+     resize border.
+     
+     Clipping here keeps every scrollbar where it belongs: inside the pane
+     that owns the content, starting below the caption. */
+  html,
+  body {
+    overflow: hidden;
+  }
+
+  html {
+    /* Opt out of the mobile text inflation that would break the 72ch measure. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* -----------------------------------------------------------------------
+     The maximized frameless window overflows the screen.
+
+     An undecorated window keeps WS_THICKFRAME, which is what makes it
+     resizable from every edge and snappable -- but Windows then maximizes it
+     to the work area PLUS the invisible resize border on all four sides.
+     Measured here: the work area is 0,0-1536,811 and the maximized window is
+     -7,-7 to 1543,819. So the top 7px of the caption and the right 7px of the
+     close button sit off-screen, and close loses a seventh of its width.
+
+     The window is left oversized -- shrinking it fights the OS and breaks
+     snap -- and the content is inset instead. The amount is the window's own
+     overflow, measured by the host each time the window is maximized, because
+     the border scales with DPI and differs per monitor: SM_CXFRAME +
+     SM_CXPADDEDBORDER reports 8 unscaled where this display actually uses 7.
+     ----------------------------------------------------------------------- */
+  html[data-maximized="true"] body {
+    padding: var(--window-inset-top, 0) var(--window-inset-right, 0)
+      var(--window-inset-bottom, 0) var(--window-inset-left, 0);
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-paper text-ink font-sans text-sm;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Nothing outside the app frame should rubber-band or pull to refresh. */
+    overscroll-behavior: none;
+  }
+
+  /* -----------------------------------------------------------------------
+     The one focus ring.
+
+     This is the floor, not the mechanism: the component layer applies the
+     `focusRing` utility for the precise offset a control needs against its own
+     background. This rule catches everything the component layer does not own
+     — a raw anchor, a tabbable table row, a Radix portal's content — so no
+     element can end up focusable with no visible ring.
+
+     `:focus-visible` rather than `:focus` so a mouse click does not leave a
+     ring behind. The `:focus:not(:focus-visible)` reset below removes the UA
+     ring in the browsers that still paint one for pointer focus.
+     ----------------------------------------------------------------------- */
+  :focus-visible {
+    outline: 2px solid var(--seal);
+    outline-offset: 2px;
+    /* A 2px ring on a 1px rule can be clipped by an ancestor's overflow; the
+       radius keeps the visible part reading as a ring rather than a corner. */
+    border-radius: inherit;
+  }
+
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* Selection in the seal wash, so highlighting reply text to copy a
+     paragraph reads as part of the same palette. */
+  ::selection {
+    background-color: var(--seal-wash);
+    color: var(--ink);
+  }
+
+  /* Form controls inherit the UI face; left alone they fall back to the UA
+     default and a Select reads in a different family from its own label. */
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* Native scrollbars in the paper palette rather than system chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--rule);
+    border-radius: 9999px;
+    /* The inset border is what keeps the thumb from touching the track edge
+       without needing a second element. */
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--ink-faint);
+  }
+
+  /* Mono by default for a path or an id, so a long absolute path does not
+     overflow its container. */
+  code,
+  kbd,
+  samp,
+  pre {
+    @apply font-mono;
+  }
+}
+
+@layer utilities {
+  /* Skip link: present in the tab order, off-screen until focused. */
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 50;
+  }
+
+  .skip-link:focus-visible {
+    left: 1rem;
+    top: 1rem;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion
+   ---------------------------------------------------------------------------
+   The contract asks for the draft-stream choreography to be disabled and the
+   reply rendered complete. This neutralises transitions and animations
+   globally rather than per-component, so a later component cannot reintroduce
+   movement by forgetting a `motion-safe:` prefix.
+
+   `0.01ms` instead of `0s` on purpose: an animation of zero duration does not
+   fire `animationend`, and a component that waits for that event to mark a
+   draft complete would hang. A duration this short is imperceptible but still
+   emits the event.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

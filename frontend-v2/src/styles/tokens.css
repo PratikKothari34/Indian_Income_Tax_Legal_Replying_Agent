@@ -1,0 +1,189 @@
+/**
+ * Ledger tokens. The single place a colour is defined.
+ *
+ * Theming works by redefining these variables, never by a `dark:` class on an
+ * element. Order matters: the media query is guarded with
+ * `:root:not([data-theme="light"])` so a manual light override wins over the
+ * OS preference, and `[data-theme="dark"]` lets a manual dark override win
+ * over an OS light preference.
+ */
+
+:root {
+  /*
+   * Paper. Warm rather than cool, and no longer anchored on pure white:
+   * #ffffff as the main working surface is glare on a screen someone
+   * reads for an hour. Surface drops to L=0.956 and the stack warms off
+   * the blue axis, which is what made the old light theme read clinical.
+   * Every foreground was recomputed against these; see the note on
+   * --ink-faint and --vermilion.
+   */
+  --paper: #f2f1ed;
+  --paper-rgb: 242 241 237;
+  --surface: #fbfaf7;
+  --surface-rgb: 251 250 247;
+  --surface-sunken: #e8e7e2;
+  --surface-sunken-rgb: 232 231 226;
+  --ink: #15181d;
+
+  --ink-rgb: 21 24 29;
+
+  /* The modal scrim. Deliberately NOT --ink: a scrim is a shadow cast over
+     the app, so it stays dark in both themes, while --ink is the text
+     colour and inverts to near-white in dark mode. Declared once, outside
+     the dark overrides, because it is the same colour either way. */
+  --scrim-rgb: 8 10 13;
+  --ink-muted: #5a6472;
+  --ink-muted-rgb: 90 100 114;
+  /* Darkened with the backgrounds: at the old #656d7a this fell to 4.22
+     on sunken once the surface came down. 4.62 worst case now. */
+  --ink-faint: #5f6773;
+  --ink-faint-rgb: 95 103 115;
+  --rule: #dcdad3;
+
+  --rule-rgb: 220 218 211;
+  /* Boundaries that carry meaning -- the only edge of an input, a Select
+     trigger, a Switch track. 1.4.11 wants 3:1 against every surface it sits
+     on, which --rule (1.15 at worst) is far from; --rule stays for decorative
+     hairlines. */
+  --rule-strong: #79818e;
+  --rule-strong-rgb: 121 129 142;
+  /* The accent: India-ink indigo, the colour of a notarial stamp. */
+  --seal: #2b3a8c;
+  --seal-rgb: 43 58 140;
+  --seal-wash: #eceef7;
+  --seal-wash-rgb: 236 238 247;
+  /* Reserved for deadlines, destructive actions and errors. Never decorative. */
+  /* Was #c8322b, which measured 4.30 on the dimmed sunken surface.
+     4.68 now, and still recognisably vermilion. */
+  --vermilion: #be2f28;
+  --vermilion-rgb: 190 47 40;
+  --vermilion-wash: #f7e9e7;
+  --vermilion-wash-rgb: 247 233 231;
+  /* Text drawn ON a solid vermilion fill -- the close button, and any
+     destructive hover that fills rather than tints. Not an inverse of
+     --ink: vermilion flips lightness between themes, so white measures
+     5.79 on the light fill and only 2.81 on the dark one. This token is
+     whichever of the two is legible. */
+  --on-vermilion: #ffffff;
+  --on-vermilion-rgb: 255 255 255;
+  --viridian: #1f6f56;
+
+  --viridian-rgb: 31 111 86;
+  --viridian-wash: #e5efe9;
+  --viridian-wash-rgb: 229 239 233;
+  --amber: #8a5a00;
+
+  --amber-rgb: 138 90 0;
+  --amber-wash: #f7eeda;
+  --amber-wash-rgb: 247 238 218;
+  /* The statutory margin on the reply pane. */
+  --margin-width: 148px;
+
+  color-scheme: light;
+}
+
+/*
+ * The margin is a fixed 148px, so on a narrow pane it stops being a pleading
+ * margin and starts eating the measure: at 360px it would leave ~180px of
+ * Newsreader, about four words a line. Below this width it collapses to zero
+ * and ReplyDocument renders the citations as a list under the reply instead.
+ * The breakpoint is the reply's own pane width, not the viewport -- see
+ * MARGIN_COLLAPSE_PX in ReplyDocument.tsx, which must agree with this value.
+ */
+@media (max-width: 720px) {
+  :root {
+    --margin-width: 0px;
+  }
+}
+
+/* OS preference, unless the user explicitly chose light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #101317;
+    --paper-rgb: 16 19 23;
+    --surface: #171b21;
+    --surface-rgb: 23 27 33;
+    --surface-sunken: #0c0e12;
+    --surface-sunken-rgb: 12 14 18;
+    --ink: #eef1f6;
+
+    --ink-rgb: 238 241 246;
+    --ink-muted: #98a3b4;
+    --ink-muted-rgb: 152 163 180;
+    --ink-faint: #8a94a4;
+    --ink-faint-rgb: 138 148 164;
+    --rule: #262c36;
+
+    --rule-rgb: 38 44 54;
+    --rule-strong: #6a7584;
+    --rule-strong-rgb: 106 117 132;
+    --seal: #8a9be8;
+
+    --seal-rgb: 138 155 232;
+    --seal-wash: #1b2140;
+    --seal-wash-rgb: 27 33 64;
+    --vermilion: #f0756c;
+
+    --vermilion-rgb: 240 117 108;
+    --vermilion-wash: #2a1513;
+    --vermilion-wash-rgb: 42 21 19;
+    --on-vermilion: #101317;
+    --on-vermilion-rgb: 16 19 23;
+    --viridian: #5fbe9a;
+
+    --viridian-rgb: 95 190 154;
+    --viridian-wash: #10271f;
+    --viridian-wash-rgb: 16 39 31;
+    --amber: #e0a54a;
+
+    --amber-rgb: 224 165 74;
+    --amber-wash: #2a1f0d;
+    --amber-wash-rgb: 42 31 13;
+    color-scheme: dark;
+  }
+}
+
+/* Manual dark override — wins over an OS light preference. */
+:root[data-theme="dark"] {
+  --paper: #101317;
+  --paper-rgb: 16 19 23;
+  --surface: #171b21;
+  --surface-rgb: 23 27 33;
+  --surface-sunken: #0c0e12;
+  --surface-sunken-rgb: 12 14 18;
+  --ink: #eef1f6;
+
+  --ink-rgb: 238 241 246;
+  --ink-muted: #98a3b4;
+  --ink-muted-rgb: 152 163 180;
+  --ink-faint: #8a94a4;
+  --ink-faint-rgb: 138 148 164;
+  --rule: #262c36;
+
+  --rule-rgb: 38 44 54;
+  --rule-strong: #6a7584;
+  --rule-strong-rgb: 106 117 132;
+  --seal: #8a9be8;
+
+  --seal-rgb: 138 155 232;
+  --seal-wash: #1b2140;
+  --seal-wash-rgb: 27 33 64;
+  --vermilion: #f0756c;
+
+  --vermilion-rgb: 240 117 108;
+  --vermilion-wash: #2a1513;
+  --vermilion-wash-rgb: 42 21 19;
+  --on-vermilion: #101317;
+  --on-vermilion-rgb: 16 19 23;
+  --viridian: #5fbe9a;
+
+  --viridian-rgb: 95 190 154;
+  --viridian-wash: #10271f;
+  --viridian-wash-rgb: 16 39 31;
+  --amber: #e0a54a;
+
+  --amber-rgb: 224 165 74;
+  --amber-wash: #2a1f0d;
+  --amber-wash-rgb: 42 31 13;
+  color-scheme: dark;
+}
